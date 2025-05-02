@@ -307,7 +307,6 @@ class CategoryPowerSampler(AbsSampler):
         # 5. first sample utterances according to category_probs
         # use cat_ptr to avoid repeatedly sampling the same utterance from the same category to form a batch
         # the pointer to the utterance in the category update after each sampling
-        logging.info(f"++++++++++++++Begin sampling utterances")
         cat_ptr = {cat: 0 for cat in self.categories}
         sampled_utts = []
         for _ in range(total_num_samples):
@@ -316,10 +315,8 @@ class CategoryPowerSampler(AbsSampler):
             utt = self.all_utts_by_category[cat][idx]
             cat_ptr[cat] += 1
             sampled_utts.append(utt)
-        logging.info(f"++++++++++++++Finish sampling utterances, total sampled utterances: {len(sampled_utts)}")
         
         # 6. patch sampled utterances into batches
-        logging.info(f"++++++++++++++Begin patching sampled utterances into batches")
         self.batch_list = []
         current_batch = []
         current_batch_bins = 0
@@ -340,7 +337,6 @@ class CategoryPowerSampler(AbsSampler):
         # 7. if the last batch is not empty, append it to the batch list
         if not self.drop_last and len(current_batch) >= 1:
             self.batch_list.append(current_batch)
-        logging.info(f"++++++++++++++Finish patching sampled utterances into batches, total batches: {len(self.batch_list)}")
 
     def __repr__(self):
         return (

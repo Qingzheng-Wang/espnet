@@ -35,7 +35,7 @@ from espnet2.optimizers.optim_groups import configure_optimizer
 from espnet2.optimizers.sgd import SGD
 from espnet2.samplers.build_batch_sampler import BATCH_TYPES, build_batch_sampler
 from espnet2.samplers.category_balanced_sampler import CategoryBalancedSampler
-from espnet2.samplers.category_power_sampler import CategoryPowerSampler
+from espnet2.samplers.category_power_sampler import CategoryPowerSampler, CategoryPowerSampler_Origin_Back_Because_Slow
 from espnet2.samplers.unsorted_batch_sampler import UnsortedBatchSampler
 from espnet2.schedulers.cosine_anneal_warmup_restart import (
     CosineAnnealingWarmupRestarts,
