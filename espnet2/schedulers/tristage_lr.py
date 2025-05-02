@@ -33,14 +33,6 @@ class TristageLR(_LRScheduler, AbsBatchStepScheduler):
         last_epoch: int = -1,
     ):
         self.max_steps = max_steps
-        assert (
-            warmup_ratio > 0 and hold_ratio > 0 and decay_ratio > 0, 
-            "The warmup_ratio, hold_ratio, and decay_ratio must be greater than 0."
-        )
-        assert (
-            warmup_ratio + hold_ratio + decay_ratio == 1, 
-            "The sum of warmup_ratio, hold_ratio, and decay_ratio must be 1."
-        )
         self.warmup_steps = int(max_steps * warmup_ratio)
         assert self.warmup_steps > 0, "The warmup_steps must be greater than 0."
         self.hold_steps = int(max_steps * hold_ratio)
