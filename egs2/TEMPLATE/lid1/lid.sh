@@ -81,6 +81,7 @@ train_set=        # Name of training set.
 valid_set=        # Name of validation set used for monitoring/tuning network training.
 cohort_set=       # Name of cohort set used for score normalization and qmf function.
 test_sets=        # Names of test sets. Multiple items (e.g., both dev and eval sets) can be specified.
+tsne_set=        # Name of set for t-SNE visualization, typically the train set
 lang=multilingual # The language type of corpus.
 
 
@@ -492,29 +493,78 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
                 --extract_embd ${extract_embd} \
                 --save_every ${save_every} \
                 --resume true \
+                --save_embd_per_utt false \
+                --save_embd_avg_lang true \
+                --save_tsne_plot false \
                 ${spk_args}
     done
 fi
 
 if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
-    log "Stage 7: Score calculation and post-processing."
+    log "Stage 7: Plot t-SNE and save language embeddings."
+
+    if [ -z "${tsne_set}" ]; then
+        tsne_set="${train_set}"
+    fi
+
+    infer_exp="${spk_exp}/inference/${tsne_set}"
+    _inference_dir=${data_feats}/${tsne_set}
+
+    if echo "${cuda_cmd}" | grep -e queue.pl -e queue-freegpu.pl &> /dev/null; then
+        # SGE can't include "/" in a job name
+        jobname="$(basename ${infer_exp})"
+    else
+        jobname="${infer_exp}/lid_inference.log"
+    fi
+
+    log "Extracting language embeddings and ids... log: '${infer_exp}/lid_inference_test.log'"
+    ${python} -m espnet2.bin.launch \
+        --cmd "${cuda_cmd} --name ${jobname}" \
+        --log ${infer_exp}/lid_inference_test.log \
+        --ngpu ${ngpu} \
+        --num_nodes ${num_nodes} \
+        --init_file_prefix ${spk_exp}/.dist_init_ \
+        --multiprocessing_distributed true -- \
+        ${python} -m espnet2.bin.lid_inference_dist \
+            --output_dir ${infer_exp} \
+            --dtype float32 \
+            --data_path_and_name_and_type "${_inference_dir}/wav.scp,speech,sound" \
+            --data_path_and_name_and_type "${_inference_dir}/utt2spk,lid_labels,text" \
+            --valid_batch_size ${inference_batch_size} \
+            --lid_train_config "${spk_exp}/config.yaml" \
+            --lid_model_file "${spk_exp}"/${inference_model} \
+            --use_preprocessor true \
+            --fix_duration false \
+            --num_workers ${nj} \
+            --extract_embd true \
+            --save_every 100 \
+            --resume true \
+            --save_embd_per_utt false \
+            --save_embd_avg_lang true \
+            --save_tsne_plot true \
+            --max_utt_per_lang_for_tsne 100 \
+            ${spk_args}
+fi
+
+if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
+    log "Stage 8: Score calculation and post-processing."
 
     infer_exp="${spk_exp}/inference"
     _inference_dir=${data_feats}/${test_sets}
     cohort_dir="${data_feats}/${cohort_set}"
 
-    log "Stage 7-a: get scores for the test set."
+    log "Stage 8-a: get scores for the test set."
     ${python} pyscripts/utils/spk_calculate_scores_from_embeddings.py ${infer_exp}/${test_sets}_embeddings.npz ${_inference_dir}/trial_label ${infer_exp}/${test_sets}_raw_trial_scores
     scorefile_cur=${infer_exp}/${test_sets}_raw_trial_scores
 
     if "$score_norm"; then
-        log "Stage 7-b: apply score normalization."
+        log "Stage 8-b: apply score normalization."
         ${python} pyscripts/utils/spk_apply_score_norm.py ${scorefile_cur} ${infer_exp}/${test_sets}_embeddings.npz ${infer_exp}/${cohort_set}_embeddings.npz ${cohort_dir}/utt2spk ${infer_exp}/${test_sets}_scorenormed_scores ${inference_config} ${ngpu}
         scorefile_cur=${infer_exp}/${test_sets}_scorenormed_scores
     fi
 
     if "$qmf_func"; then
-        log "Stage 7-c: apply QMF calibration."
+        log "Stage 8-c: apply QMF calibration."
         log "get raw scores for the qmf train set."
         ${python} pyscripts/utils/spk_calculate_scores_from_embeddings.py ${infer_exp}/qmf/${train_set}_embeddings.npz ${cohort_dir}/qmf_train_label ${infer_exp}/qmf/${cohort_set}_raw_trial_scores
 
@@ -534,8 +584,8 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
 
 fi
 
-if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
-    log "Stage 8: Calculate metrics."
+if [ ${stage} -le 9 ] && [ ${stop_stage} -ge 9 ]; then
+    log "Stage 9: Calculate metrics."
     infer_exp="${spk_exp}/inference"
     _inference_dir=${data_feats}/${test_sets}
 
@@ -562,8 +612,8 @@ if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
 fi
 
 packed_model="${spk_exp}/${spk_exp##*/}_${inference_model%.*}.zip"
-if [ ${stage} -le 9 ] && [ ${stop_stage} -ge 9 ] && ! [[ " ${skip_stages} " =~ [[:space:]]9[[:space:]] ]]; then
-    log "Stage 9: Pack model: ${packed_model}"
+if [ ${stage} -le 10 ] && [ ${stop_stage} -ge 10 ] && ! [[ " ${skip_stages} " =~ [[:space:]]10[[:space:]] ]]; then
+    log "Stage 10: Pack model: ${packed_model}"
 
     # shellcheck disable=SC2086
     ${python} -m espnet2.bin.pack spk \
@@ -574,8 +624,8 @@ if [ ${stage} -le 9 ] && [ ${stop_stage} -ge 9 ] && ! [[ " ${skip_stages} " =~ [
         --outpath "${packed_model}"
 fi
 
-if [ ${stage} -le 10 ] && [ ${stop_stage} -ge 10 ] && ! [[ " ${skip_stages} " =~ [[:space:]]10[[:space:]] ]]; then
-    log "Stage 10: Upload model to HuggingFace: ${hf_repo}"
+if [ ${stage} -le 11 ] && [ ${stop_stage} -ge 11 ] && ! [[ " ${skip_stages} " =~ [[:space:]]11[[:space:]] ]]; then
+    log "Stage 11: Upload model to HuggingFace: ${hf_repo}"
     [ -z "${hf_repo}" ] && \
         log "ERROR: You need to setup the variable hf_repo with the name of the repository located at HuggingFace, follow the following steps described here https://github.com/espnet/espnet/blob/master/CONTRIBUTING.md#132-espnet2-recipes" && \
     exit 1

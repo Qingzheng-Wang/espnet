@@ -35,6 +35,7 @@ from espnet2.utils.types import (
 )
 from espnet2.tasks.lid import LIDTask
 from espnet.utils.cli_utils import get_commandline_args
+from sklearn.manifold import TSNE
 
 
 def extract_embed_lid(args):
@@ -137,6 +138,8 @@ def extract_embed_lid(args):
     reporter = Reporter()
 
     # 6. Run inference
+    lang_to_embds_dic = {lang_id: [] for lang_id in idx2lang.values()} # {lang_id: [lang_embd for utt1, utt2, ...]}
+    lang_counter_dic = {lang_id: 0 for lang_id in idx2lang.values()} # {lang_id: num of utts}
     with reporter.observe("valid") as sub_reporter:
         LIDTask.trainer.extract_embed_lid(
             model=lid_model,
@@ -150,6 +153,10 @@ def extract_embed_lid(args):
             extract_embd=args.extract_embd, # default: False
             save_every=args.save_every,
             resume=args.resume,
+            lang_to_embds_dic=lang_to_embds_dic,
+            save_embd_per_utt=args.save_embd_per_utt,
+            max_num_utt_per_lang=args.max_utt_per_lang_for_tsne,
+            lang_counter_dic=lang_counter_dic,
         )
 
     # 7. Merge results from all processes
@@ -157,15 +164,15 @@ def extract_embed_lid(args):
         torch.distributed.barrier() # sync all processes
     if not distributed_option.distributed or distributed_option.dist_rank == 0:
         # Combine dictionaries into one
-        if args.extract_embd:
-            npzs = glob(args.output_dir + "/embeddings*.npz")
+        if args.extract_embd and args.save_embd_per_utt:
+            npzs = glob(f"{args.output_dir}/embeddings*.npz")
             logging.info(f"{npzs}")
             embd_dic = {}
             for npz in npzs:
                 tmp_dic = dict(np.load(npz))
                 embd_dic.update(tmp_dic)
 
-        lid_files = glob(args.output_dir + "/lids*")
+        lid_files = glob(f"{args.output_dir}/lids*")
         lid_dic = {}
         for lid_file in lid_files:
             with open(lid_file, "r") as f:
@@ -174,8 +181,8 @@ def extract_embed_lid(args):
                     lid_dic[utt_id] = lid
 
         set_name = args.data_path_and_name_and_type[0][0].split("/")[-2]
-        if args.extract_embd:
-            np.savez(args.output_dir + f"/{set_name}_embeddings", **embd_dic)
+        if args.extract_embd and args.save_embd_per_utt:
+            np.savez(f"{args.output_dir}/{set_name}_embeddings", **embd_dic)
             for npz in npzs:
                 os.remove(npz)
 
@@ -184,6 +191,163 @@ def extract_embed_lid(args):
                 f.write(f"{utt_id} {lid}\n")
         for lid_file in lid_files:
             os.remove(lid_file)
+        
+        np.savez(
+            f"{args.output_dir}/{set_name}_lang_to_list_embds",
+            **lang_to_embds_dic,
+        )
+
+        lang_to_avg_embd_dic = None
+        logging.info(f"args.save_embd_per_utt: {args.save_embd_per_utt}")
+        if args.extract_embd and args.save_embd_avg_lang:
+            lang_to_avg_embd_dic = {}
+            for lang_id, embds in lang_to_embds_dic.items():
+                if len(embds) == 0:
+                    continue
+                embds_array = np.stack(embds, axis=0)  # Stack list of ndarrays into a single ndarray
+                avg_embd = np.mean(embds_array, axis=0)  # Compute mean along the first axis
+                lang_to_avg_embd_dic[lang_id] = avg_embd
+            np.savez(
+                f"{args.output_dir}/{set_name}_lang_to_avg_embd",
+                **lang_to_avg_embd_dic,
+            )
+        
+        logging.info(f"args.save_tsne_plot: {args.save_tsne_plot}")
+        if args.extract_embd and args.save_tsne_plot:
+            gen_tsne_plot(
+                lang_to_embds_dic,
+                f"{args.output_dir}/{set_name}_tsne_plot",
+                args.seed,
+                perplexity=50,
+                max_iter=1000,
+            )
+            if lang_to_avg_embd_dic is not None:
+                gen_tsne_plot(
+                    lang_to_avg_embd_dic,
+                    f"{args.output_dir}/{set_name}_tsne_plot",
+                    args.seed,
+                    perplexity=5,
+                    max_iter=1000,
+                )
+            else:
+                lang_to_avg_embd_dic = {}
+                for lang_id, embds in lang_to_embds_dic.items():
+                    if len(embds) == 0:
+                        continue
+                    embds_array = np.stack(embds, axis=0)  # Stack list of ndarrays into a single ndarray
+                    avg_embd = np.mean(embds_array, axis=0)  # Compute mean along the first axis
+                    lang_to_avg_embd_dic[lang_id] = avg_embd
+                gen_tsne_plot(
+                    lang_to_avg_embd_dic,
+                    f"{args.output_dir}/{set_name}_tsne_plot",
+                    args.seed,
+                    perplexity=5,
+                    max_iter=1000,
+                )
+            
+def gen_tsne_plot(
+        lang_to_embds_dic, 
+        output_dir, 
+        seed,
+        perplexity=5,
+        max_iter=1000,
+    ):
+    """
+    Generate t-SNE plot for language embeddings with labels directly on the points.
+    Args:
+        lang_to_embds_dic (dict): Dictionary mapping language IDs (iso3 code) to embeddings.
+        output_dir (str): Directory to save the t-SNE plot.
+        seed (int): Random seed for reproducibility.
+    """
+
+    import matplotlib.pyplot as plt
+    from sklearn.manifold import TSNE
+    import numpy as np
+    import logging
+
+    try:
+        from adjustText import adjust_text
+    except ImportError:
+        logging.error("Please install adjustText: pip install adjustText")
+        raise
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Prepare embeddings and labels
+    embeddings = []
+    labels = []
+
+    logging.info("Preparing embeddings and labels...")
+    for lang_id, embds in lang_to_embds_dic.items():
+        if isinstance(embds, list):  # A list of embeddings for each language
+            for embd in embds:
+                embeddings.append(embd)
+                labels.append(lang_id)
+            plot_name = "lang_to_list_embds"
+        elif isinstance(embds, np.ndarray):  # A single embedding averaged across all utterances
+            embeddings.append(embds)
+            labels.append(lang_id)
+            plot_name = "lang_to_avg_embd"
+        else:
+            raise ValueError(f"Unsupported type for embeddings: {type(embds)}")
+
+    embeddings = np.array(embeddings)
+
+    # Perform t-SNE
+    logging.info("Performing t-SNE...")
+    tsne = TSNE(n_components=2, random_state=seed, perplexity=perplexity, max_iter=max_iter)
+    tsne_results = tsne.fit_transform(embeddings)
+
+    # Plot t-SNE results
+    logging.info("Plotting t-SNE results...")
+    plt.figure(figsize=(12, 10))
+
+    if plot_name == "lang_to_list_embds":
+        # Group points by language and calculate cluster centers
+        unique_labels = list(set(labels))
+        color_map = plt.get_cmap("tab10", len(unique_labels))
+        for i, lang_id in enumerate(unique_labels):
+            indices = [j for j, label in enumerate(labels) if label == lang_id]
+            cluster_points = tsne_results[indices]
+            cluster_center = cluster_points.mean(axis=0)  # Calculate cluster center
+
+            # Plot points for this language
+            plt.scatter(
+                cluster_points[:, 0],
+                cluster_points[:, 1],
+                label=lang_id,
+                color=color_map(i),
+                alpha=0.7,
+                s=30,
+            )
+
+            # Add label at the cluster center
+            plt.text(
+                cluster_center[0],
+                cluster_center[1],
+                lang_id,
+                fontsize=10,
+                fontweight="bold",
+                ha="center",
+                va="center",
+                bbox=dict(facecolor="white", alpha=0.6, edgecolor="none"),
+            )
+    elif plot_name == "lang_to_avg_embd":
+        # Use scatter plot with text labels for each language
+        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7, s=30)
+        texts = []
+        for i, label in enumerate(labels):
+            texts.append(plt.text(tsne_results[i, 0], tsne_results[i, 1], label, fontsize=8, alpha=0.8))
+        adjust_text(texts, arrowprops=dict(arrowstyle="->", color='gray', lw=0.5))
+
+    plt.title("t-SNE Visualization of Language Embeddings")
+
+    # Save plot
+    plot_file = f"{output_dir}/tsne_plot_{plot_name}.png"
+    plt.savefig(plot_file, bbox_inches="tight", dpi=400)
+    plt.close()
+    logging.info(f"t-SNE plot saved to {plot_file}")
 
 def get_parser():
     parser = config_argparse.ArgumentParser(
@@ -252,6 +416,24 @@ def get_parser():
         type=str2bool,
         default=False,
         help="Determine whether to extract embedding or not",
+    )
+    group.add_argument(
+        "--save_embd_per_utt",
+        type=str2bool,
+        default=False,
+        help="Determine whether to save embedding for each utterance or not",
+    )
+    group.add_argument(
+        "--save_embd_avg_lang",
+        type=str2bool,
+        default=False,
+        help="Determine whether to save embedding for averaged across all utterances of a language or not",
+    )
+    group.add_argument(
+        "--save_tsne_plot",
+        type=str2bool,
+        default=False,
+        help="Determine whether to save tsne plot or not",
     )
 
     group = parser.add_argument_group("distributed training related")
@@ -470,6 +652,12 @@ def get_parser():
         type=str2bool,
         default=True,
         help="If True, avoid repeating existing inference results",
+    )
+    group.add_argument(
+        "--max_utt_per_lang_for_tsne",
+        type=int,
+        default=None,
+        help="The maximum number of utterances per language for t-SNE",
     )
 
     return parser

@@ -2,23 +2,21 @@
 Trainer module for language identification and language embedding extraction.
 """
 
-from typing import Dict, Iterable
+from typing import Dict, Iterable, List
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 import os
 import logging
-from tqdm import tqdm
 
 from typeguard import typechecked
 from espnet2.torch_utils.device_funcs import to_device
 from espnet2.train.distributed_utils import DistributedOption
 from espnet2.train.reporter import SubReporter
 from espnet2.train.trainer import Trainer, TrainerOptions
+from filelock import FileLock
 
-if torch.distributed.is_available():
-    from torch.distributed import ReduceOp
 
 
 class LIDTrainer(Trainer):
@@ -44,6 +42,10 @@ class LIDTrainer(Trainer):
         extract_embd: bool = False,
         save_every: int = 1000,
         resume: bool = True,
+        lang_to_embds_dic: Dict[str, List[np.ndarray]] = None,
+        save_embd_per_utt: bool = False,
+        max_num_utt_per_lang: int = None,
+        lang_counter_dic: Dict[str, int] = None,
     ) -> None: 
         # Extract language embedding and lids. 
         ngpu = options.ngpu
@@ -51,7 +53,7 @@ class LIDTrainer(Trainer):
 
         model.eval()
         if extract_embd:
-            lang_embd_dic = {}
+            lang_embd_dic = {} # {utt_id: lang_embd}, the language embedding for a specific utterance
         lang_id_dic = {} # {utt_id: lang_id}
 
         # [For distributed] Because iteration counts are not always equals between
@@ -63,6 +65,7 @@ class LIDTrainer(Trainer):
         utt_id_whole_list = []
         speech_list = []
         speech_length_list = []
+        lid_label_list = []
         task_token = None
         if distributed:
             rank = torch.distributed.get_rank()
@@ -82,12 +85,23 @@ class LIDTrainer(Trainer):
                         skip_utts.add(utt_id)
             logging.info(f"[Rank {rank}] Resume: {len(skip_utts)} utterances found in {output_dir}/lids{rank}")
         for utt_id, batch in iterator:
+            if max_num_utt_per_lang is not None and lang_counter_dic is not None:
+                num_langs_reach_max_num = 0
+                for count in lang_counter_dic.values():
+                    if count >= max_num_utt_per_lang:
+                        num_langs_reach_max_num += 1
+                if num_langs_reach_max_num == len(lang_counter_dic):
+                    logging.info(f"[Rank {rank}] All languages reach max_num_utt_per_lang: {max_num_utt_per_lang}.")
+                    break
             if "task_tokens" in batch:
                 task_token = batch["task_tokens"][0]
 
             assert isinstance(batch, dict), type(batch)
-            for _utt_id, _speech, _speech_length in zip(
-                utt_id, batch["speech"], batch["speech_lengths"]
+            for _utt_id, _speech, _speech_length, _lid_label in zip(
+                utt_id, 
+                batch["speech"], 
+                batch["speech_lengths"], 
+                batch.get("lid_labels", [None] * len(utt_id)) # lid label is the index, not the iso3 code.
             ):
                 if resume:
                     if _utt_id in skip_utts:
@@ -96,11 +110,24 @@ class LIDTrainer(Trainer):
                         num_recheck += 1
                         continue
                 if _utt_id not in utt_id_whole_list:
+                    if max_num_utt_per_lang is not None and lang_counter_dic is not None:
+                        if lang_counter_dic[idx2lang[_lid_label.item()]] >= max_num_utt_per_lang:
+                            logging.info(f"[Rank {rank}] Language {idx2lang[_lid_label.item()]} reach max_num_utt_per_lang: {max_num_utt_per_lang}.")
+                            continue
+                        else:
+                            if distributed:
+                                # Use a lock file to ensure atomic updates to the shared dictionary
+                                lock_file = f"{output_dir}/lock_{idx2lang[_lid_label.item()]}.lock"
+                                with FileLock(lock_file):
+                                    lang_counter_dic[idx2lang[_lid_label.item()]] += 1
+                            else:
+                                lang_counter_dic[idx2lang[_lid_label.item()]] += 1
                     utt_id_whole_list.append(_utt_id)
                     if idx % world_size == rank:
                         utt_id_list.append(_utt_id)
                         speech_list.append(_speech)
                         speech_length_list.append(_speech_length)
+                        lid_label_list.append(_lid_label)
                     idx += 1
 
                     if len(utt_id_list) == custom_bs:
@@ -138,14 +165,23 @@ class LIDTrainer(Trainer):
                             lang_embds = F.normalize(lang_embds, p=2, dim=1)
                         pred_lids = [idx2lang[lid.item()] for lid in pred_lids]
 
-                        for uid, _lang_embd, _pred_lid in zip(utt_id_list, lang_embds, pred_lids):
+                        for uid, _lang_embd, _pred_lid, _lid_label_target in zip(utt_id_list, lang_embds, pred_lids, lid_label_list):
                             if extract_embd:
-                                lang_embd_dic[uid] = _lang_embd.detach().cpu().numpy()
+                                _lang_embd_numpy = _lang_embd.detach().cpu().numpy()
+                                target_lid = idx2lang[_lid_label_target.item()]
+                                if distributed:
+                                    # Use a lock file to ensure atomic updates to the shared dictionary
+                                    lock_file = f"{output_dir}/lock_{target_lid}.lock"
+                                    with FileLock(lock_file):
+                                        lang_to_embds_dic[target_lid].append(_lang_embd_numpy)
+                                else:
+                                    lang_to_embds_dic[target_lid].append(_lang_embd_numpy)
+                                lang_embd_dic[uid] = _lang_embd_numpy
                             lang_id_dic[uid] = _pred_lid
                         
-                        # save middle results
+                        # save every `save_every` utterances
                         if len(lang_id_dic) >= save_every:
-                            if extract_embd:
+                            if extract_embd and save_embd_per_utt:
                                 # save each middle step results to different files
                                 np.savez(output_dir + f"/embeddings{rank + world_size * step}", **lang_embd_dic)
                             with open(f"{output_dir}/lids{rank}", "a") as f:
@@ -153,6 +189,7 @@ class LIDTrainer(Trainer):
                                 for uid, lid in lang_id_dic.items():
                                     f.write(f"{uid} {lid}\n")
                             logging.info(f"[Rank {rank}] Saved {len(lang_id_dic)} utts at step {step}")
+                            logging.info(f"[Rank {rank}] Current lang_counter_dic: {lang_counter_dic}")
                             if extract_embd:
                                 lang_embd_dic.clear()
                             lang_id_dic.clear()
@@ -161,6 +198,7 @@ class LIDTrainer(Trainer):
                         utt_id_list = []
                         speech_list = []
                         speech_length_list = []
+                        lid_label_list = []
 
         if len(utt_id_list) != 0:
             try:
@@ -193,17 +231,27 @@ class LIDTrainer(Trainer):
                 task_tokens=task_tokens,
                 extract_embd=True,
             ) # [batch_size, dim], [batch_size]
-            lang_embds = F.normalize(lang_embds, p=2, dim=1)
+            if extract_embd:
+                lang_embds = F.normalize(lang_embds, p=2, dim=1)
             pred_lids = [idx2lang[lid.item()] for lid in pred_lids]
 
-            for uid, _lang_embd, _pred_lid in zip(utt_id_list, lang_embds, pred_lids):
+            for uid, _lang_embd, _pred_lid, _lid_label_target in zip(utt_id_list, lang_embds, pred_lids, lid_label_list):
                 if extract_embd:
-                    lang_embd_dic[uid] = _lang_embd.detach().cpu().numpy()
+                    _lang_embd_numpy = _lang_embd.detach().cpu().numpy()
+                    target_lid = idx2lang[_lid_label_target.item()]
+                    if distributed:
+                        # Use a lock file to ensure atomic updates to the shared dictionary
+                        lock_file = f"{output_dir}/lock_{target_lid}.lock"
+                        with FileLock(lock_file):
+                            lang_to_embds_dic[target_lid].append(_lang_embd_numpy)
+                    else:
+                        lang_to_embds_dic[target_lid].append(_lang_embd_numpy)
+                    lang_embd_dic[uid] = _lang_embd_numpy
                 lang_id_dic[uid] = _pred_lid
 
         if len(lang_id_dic) != 0:
             # save the last results
-            if extract_embd:
+            if extract_embd and save_embd_per_utt:
                 np.savez(output_dir + f"/embeddings{rank + world_size * step}", **lang_embd_dic)
             with open(f"{output_dir}/lids{rank}", "a") as f:
                 # save all middle step results to the same file
