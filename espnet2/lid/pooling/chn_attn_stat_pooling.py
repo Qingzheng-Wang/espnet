@@ -39,11 +39,11 @@ class ChnAttnStatPooling(AbsPooling):
         t = x.size()[-1]
         if feat_lengths is not None:
             mean = torch.stack(
-                [torch.mean(x[i, :, :l.item()], dim=-1) for i, l in enumerate(feat_lengths)],
+                [torch.mean(x[i, :, :l.item()], dim=-1, keepdim=True) for i, l in enumerate(feat_lengths)],
                 dim=0,
             ).repeat(1, 1, t)
             var = torch.stack(
-                [torch.var(x[i, :, :l.item()], dim=-1, unbiased=False) for i, l in enumerate(feat_lengths)],
+                [torch.var(x[i, :, :l.item()], dim=-1, unbiased=False, keepdim=True) for i, l in enumerate(feat_lengths)],
                 dim=0,
             )
             var = var.clamp(min=1e-4, max=1e4)
