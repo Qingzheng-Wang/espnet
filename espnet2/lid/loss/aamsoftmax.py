@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from espnet2.spk.loss.abs_loss import AbsLoss
+from espnet2.lid.loss.abs_loss import AbsLoss
 
 
 class AAMSoftmax(AbsLoss):
