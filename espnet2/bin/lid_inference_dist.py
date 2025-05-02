@@ -3,10 +3,8 @@ import argparse
 import logging
 import os
 import sys
-import json
 from glob import glob
 
-import humanfriendly
 import numpy as np
 import torch
 from torch.multiprocessing.spawn import ProcessContext
@@ -216,15 +214,15 @@ def extract_embed_lid(args):
         if args.extract_embd and args.save_tsne_plot:
             gen_tsne_plot(
                 lang_to_embds_dic,
-                f"{args.output_dir}/{set_name}_tsne_plot",
+                f"{args.output_dir}/tsne_plots",
                 args.seed,
-                perplexity=50,
+                perplexity=40,
                 max_iter=1000,
             )
             if lang_to_avg_embd_dic is not None:
                 gen_tsne_plot(
                     lang_to_avg_embd_dic,
-                    f"{args.output_dir}/{set_name}_tsne_plot",
+                    f"{args.output_dir}/tsne_plots",
                     args.seed,
                     perplexity=5,
                     max_iter=1000,
@@ -239,7 +237,7 @@ def extract_embed_lid(args):
                     lang_to_avg_embd_dic[lang_id] = avg_embd
                 gen_tsne_plot(
                     lang_to_avg_embd_dic,
-                    f"{args.output_dir}/{set_name}_tsne_plot",
+                    f"{args.output_dir}/tsne_plots",
                     args.seed,
                     perplexity=5,
                     max_iter=1000,
@@ -264,11 +262,17 @@ def gen_tsne_plot(
     from sklearn.manifold import TSNE
     import numpy as np
     import logging
+    import pandas as pd
 
     try:
         from adjustText import adjust_text
     except ImportError:
         logging.error("Please install adjustText: pip install adjustText")
+        raise
+    try:
+        import plotly.express as px
+    except ImportError:
+        logging.error("Please install plotly: pip install plotly")
         raise
 
     if not os.path.exists(output_dir):
@@ -299,14 +303,14 @@ def gen_tsne_plot(
     tsne = TSNE(n_components=2, random_state=seed, perplexity=perplexity, max_iter=max_iter)
     tsne_results = tsne.fit_transform(embeddings)
 
-    # Plot t-SNE results
+    # ========== Matplotlib Visualization ==========
     logging.info("Plotting t-SNE results...")
     plt.figure(figsize=(12, 10))
 
     if plot_name == "lang_to_list_embds":
         # Group points by language and calculate cluster centers
         unique_labels = list(set(labels))
-        color_map = plt.get_cmap("tab10", len(unique_labels))
+        color_map = plt.get_cmap("tab20", len(unique_labels))
         for i, lang_id in enumerate(unique_labels):
             indices = [j for j, label in enumerate(labels) if label == lang_id]
             cluster_points = tsne_results[indices]
@@ -348,6 +352,25 @@ def gen_tsne_plot(
     plt.savefig(plot_file, bbox_inches="tight", dpi=400)
     plt.close()
     logging.info(f"t-SNE plot saved to {plot_file}")
+
+    # ========== Plotly Interactive Visualization ==========
+    df = pd.DataFrame({
+        'x': tsne_results[:, 0],
+        'y': tsne_results[:, 1],
+        'label': labels,
+        # You can add more columns here for hover info
+    })
+
+    # Plot with Plotly Express
+    fig = px.scatter(
+        df, x='x', y='y', color='label',
+        hover_name='label',
+        title="t-SNE Visualization of Language Embeddings (Interactive)",
+    )
+
+    # Save as HTML (interactive)
+    plot_file = f"{output_dir}/tsne_plot_{plot_name}.html"
+    fig.write_html(plot_file)
 
 def get_parser():
     parser = config_argparse.ArgumentParser(
