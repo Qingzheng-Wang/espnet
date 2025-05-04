@@ -9,7 +9,7 @@ test_sets="dev_voxlingua107_lang"
 tsne_set="train_voxlingua107_lang"
 feats_type="raw"
 exp_dir="exp_voxlingua107_raw"
-inference_model="valid.loss.best.pth"
+inference_model="valid.accuracy.best.pth"
 
 ./lid.sh \
     --feats_type ${feats_type} \
