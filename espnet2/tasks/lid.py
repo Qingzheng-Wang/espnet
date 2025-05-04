@@ -31,6 +31,7 @@ from espnet2.lid.loss.aamsoftmax_subcenter_intertopk import (
     ArcMarginProduct_intertopk_subcenter,
 )
 from espnet2.lid.loss.softmax import Softmax
+from espnet2.lid.loss.aamsoftmax_sc_topk_lang2vec import AAMSoftmaxSCTopKLang2Vec
 from espnet2.lid.pooling.abs_pooling import AbsPooling
 from espnet2.lid.pooling.chn_attn_stat_pooling import ChnAttnStatPooling
 from espnet2.lid.pooling.mean_pooling import MeanPooling
@@ -145,6 +146,7 @@ loss_choices = ClassChoices(
         aamsoftmax=AAMSoftmax,
         aamsoftmax_sc_topk=ArcMarginProduct_intertopk_subcenter,
         softmax=Softmax,
+        aamsoftmax_sc_topk_lang2vec=AAMSoftmaxSCTopKLang2Vec,
     ),
     default="aamsoftmax",
 )
