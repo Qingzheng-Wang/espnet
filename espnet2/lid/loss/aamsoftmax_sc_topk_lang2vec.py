@@ -1,27 +1,20 @@
-# code from WeSpeaker: https://github.com/wenet-e2e/wespeaker/blob/
-# c9ec537b53fe1e04525be74b2550ee95bed3a891/wespeaker/models/projections.py#L243
-# For understanding the code, please refer to:
-# https://chatgpt.com/share/67fb18e0-1f40-800a-b385-7636de448c11
-
 import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import lang2vec.lang2vec as l2v
 
 from espnet2.lid.loss.abs_loss import AbsLoss
 
 
-class ArcMarginProduct_intertopk_subcenter(AbsLoss):
-    r"""Implement of large margin arc distance with intertopk and subcenter:
+class AAMSoftmaxSCTopKLang2Vec(AbsLoss):
+    r"""
+    AAMSoftmax with intertopk and subcenter, and lang2vec prediction.
 
-    Reference:
-        MULTI-QUERY MULTI-HEAD ATTENTION POOLING AND INTER-TOPK PENALTY
-        FOR SPEAKER VERIFICATION.
-        https://arxiv.org/pdf/2110.05042.pdf
-        Sub-center ArcFace: Boosting Face Recognition by
-        Large-Scale Noisy Web Faces.
-        https://ibug.doc.ic.ac.uk/media/uploads/documents/eccv_1445.pdf
+    The AAMSoftmax part is same with ArcMarginProduct_intertopk_subcenter in 
+    `aamsoftmax_subcenter_intertopk.py`
+
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
@@ -45,6 +38,9 @@ class ArcMarginProduct_intertopk_subcenter(AbsLoss):
         mp=0.06,
         k_top=5,
         do_lm=False,
+        lang2vec_dim: int = None,
+        lang2vec_type: str = None, # geo, phonology_knn, syntax_knn, inventory_knn
+        lang2vec_weight: float = None,
     ):
         super().__init__(nout)
         self.in_features = nout
@@ -81,6 +77,29 @@ class ArcMarginProduct_intertopk_subcenter(AbsLoss):
         self.sin_mp = math.sin(0.0)
 
         self.ce = nn.CrossEntropyLoss()
+
+        self.lang2vec_dim = lang2vec_dim
+        self.lang2vec_type = lang2vec_type
+        self.lang2vec_weight = lang2vec_weight
+
+        if (
+            self.lang2vec_dim is not None and 
+            self.lang2vec_type is not None and 
+            self.lang2vec_weight is not None
+        ):
+            if lang2vec_type == "geo":
+                self.lang2vec_head = nn.Sequential(
+                    nn.Linear(nout, lang2vec_dim),
+                )
+                self.lang2vec_loss = nn.MSELoss()
+            elif lang2vec_type in ["phonology_knn", "syntax_knn", "inventory_knn"]:
+                self.lang2vec_head = nn.Sequential(
+                    nn.Linear(nout, lang2vec_dim),
+                )
+                self.lang2vec_loss = nn.BCEWithLogitsLoss() # first sigmoid, then BCE, this benefits autocast than Sigmoid + BCE
+            else:
+                raise ValueError(f"Unknown lang2vec type: {lang2vec_type}, support lang2vec types: geo, phonology_knn, syntax_knn, inventory_knn")
+
 
     def update(self, margin=0.2):
         self.margin = margin
@@ -162,4 +181,17 @@ class ArcMarginProduct_intertopk_subcenter(AbsLoss):
         output *= self.scale
         
         loss = self.ce(output, label)
-        return loss, accuracy, pred_lids
+        class_loss = loss # classification loss
+        lang2vec_loss = None
+
+        if (
+            lang2vec is not None and
+            self.lang2vec_dim is not None and 
+            self.lang2vec_type is not None and 
+            self.lang2vec_weight is not None
+        ):
+            lang2vec_loss = self.lang2vec_loss(self.lang2vec_head(input), lang2vec)
+            loss *= (1 - self.lang2vec_weight)
+            loss += self.lang2vec_weight * lang2vec_loss
+
+        return loss, accuracy, pred_lids, class_loss, lang2vec_loss

@@ -11,6 +11,7 @@ import librosa
 import numpy as np
 import scipy.signal
 import soundfile
+import lang2vec.lang2vec as l2v
 from typeguard import typechecked
 
 import espnet2.speechlm.definitions as speechlm_definitions
@@ -2220,20 +2221,29 @@ class LIDPreprocessor(CommonPreprocessor):
         ] = None,
         noise_apply_prob: float = 1.0,
         short_noise_thres: float = 0.5,
+        use_lang2vec: bool = False,
+        lang2vec_type: str = None,
     ):
         super().__init__(train, rir_scp=rir_scp, rir_apply_prob=rir_apply_prob)
 
         self.spk2label = None  # a dictionary that maps string speaker label to int
+        self.lang2vec = None
         self.sample_rate = sample_rate
         self.target_duration = int(target_duration * sample_rate) if target_duration else None
         self.fix_duration = fix_duration
         self.train = train
         self.spk2utt_path = spk2utt
+        self.use_lang2vec = use_lang2vec
+        self.lang2vec_type = lang2vec_type
 
         with open(spk2utt, "r") as f_s2u:
             self.spk2utt = f_s2u.readlines()
         self._make_label_mapping()
         self.nspk = len(self.spk2utt)
+
+        if self.use_lang2vec and self.lang2vec_type is not None:
+            logging.info(f"Using lang2vec {self.lang2vec_type}")
+            self.get_lang2vec()
 
         self.rir_scp = rir_scp
 
@@ -2292,6 +2302,11 @@ class LIDPreprocessor(CommonPreprocessor):
             spk = spk.strip().split(" ")[0]
             self.spk2label[spk] = label_idx
             label_idx += 1
+    
+    def get_lang2vec(self):
+        langs = list(self.spk2label.keys())
+        lang2vec_list = l2v.get_features(langs, self.lang2vec_type) # {lang: feature (list)}
+        self.lang2vec = {lang : np.array(vec) for lang, vec in lang2vec_list.items()}
 
     def _speech_process(self, data: Dict[np.ndarray, str]):
         # For LID, since we don't do speaker verification in validation, 
@@ -2414,11 +2429,15 @@ class LIDPreprocessor(CommonPreprocessor):
         self, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, np.ndarray]:
         """Make speaker labels into integers."""
-        int_label = self.spk2label[data["lid_labels"]]
+        iso3_labels = data["lid_labels"]
+        int_label = self.spk2label[iso3_labels]
         data["lid_labels"] = np.asarray([int_label], dtype=np.int64)
 
         if "task_tokens" in data:
             data["task_tokens"] = np.asarray([int(data["task_tokens"])])
+        
+        if self.use_lang2vec and self.lang2vec_type is not None:
+            data["lang2vecs"] = self.lang2vec[iso3_labels] # ndarray, (bs, lang2vec_dim)
 
         return data
 

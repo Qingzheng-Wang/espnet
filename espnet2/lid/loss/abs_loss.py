@@ -11,5 +11,5 @@ class AbsLoss(nn.Module):
         super().__init__()
 
     @abstractmethod
-    def forward(self, x: torch.Tensor, label=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, label=None, lang2vec=None) -> torch.Tensor:
         raise NotImplementedError

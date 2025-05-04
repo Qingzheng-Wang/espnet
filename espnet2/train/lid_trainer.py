@@ -47,6 +47,22 @@ class LIDTrainer(Trainer):
         max_num_utt_per_lang: int = None,
         lang_counter_dic: Dict[str, int] = None,
     ) -> None: 
+        """
+        Extract language embedding and language id for each utterance in the dataset.
+
+        Defaultly extract the language identification, 
+        if `extract_embd` is set to True, extract the language embedding as well.
+
+        lang_embd_dic: {utt_id: lang_embd}, the language embedding for a specific utterance,
+        this is used for temporary saving the language embedding of each utterance,
+        and will be written to the dist every `save_every` utterances.
+        lang_to_embds_dic: {lang: [utt1 embd, utt1 embd ...]}, the language embedding for the 
+        utterances corresponding to each language, if set `extract_embd` to True, this will be 
+        defaultly used, this will not be written to the dist, but will be (in bin/lid_inference_dist.py) 
+        used for calculating the average language embedding for each language, and ploting the tsne plot.
+
+        The language embeddings for each utterance are all normalized.
+        """
         # Extract language embedding and lids. 
         ngpu = options.ngpu
         distributed = distributed_option.distributed

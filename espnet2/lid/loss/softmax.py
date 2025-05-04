@@ -25,7 +25,7 @@ class Softmax(AbsLoss):
         self.ce = nn.CrossEntropyLoss()
         nn.init.xavier_normal_(self.weight, gain=1)
 
-    def forward(self, x, label=None):
+    def forward(self, x, label=None, lang2vec=None):
         assert x.size()[1] == self.in_feats
 
         logits = F.linear(F.normalize(x), F.normalize(self.weight))

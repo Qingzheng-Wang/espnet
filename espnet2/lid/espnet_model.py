@@ -53,6 +53,7 @@ class ESPnetLIDModel(AbsESPnetModel):
         speech_lengths: torch.Tensor,
         lid_labels: Optional[torch.Tensor] = None,
         task_tokens: Optional[torch.Tensor] = None,
+        lang2vecs: Optional[torch.Tensor] = None,
         extract_embd: bool = False,
         **kwargs,
     ) -> Union[
@@ -101,14 +102,25 @@ class ESPnetLIDModel(AbsESPnetModel):
 
         # 4. calculate loss
         # NOTE: if lid_labels is None, loss and accuracy are None
-        loss, accuracy, pred_lids = self.loss(lang_embd, lid_labels)
+        class_loss = None
+        if lang2vecs is not None:
+            loss, accuracy, pred_lids, class_loss, lang2vec_loss  = self.loss(lang_embd, lid_labels, lang2vecs)
+        else:
+            loss, accuracy, pred_lids = self.loss(lang_embd, lid_labels)
 
         if extract_embd:
             return lang_embd, pred_lids
 
         stats["loss"] = loss.detach()
+        if class_loss is not None:
+            stats["class_loss"] = class_loss.detach() # if not use lang2vec, class_loss == loss
+        else:
+            stats["class_loss"] = loss.detach()
         if accuracy is not None: # if not provide labels, accuracy is None
             stats["accuracy"] = accuracy.detach()
+        if lang2vecs is not None:
+            lang2vec_type = self.loss.lang2vec_type
+            stats[f"{lang2vec_type}_loss"] = lang2vec_loss.detach()
 
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
         return loss, stats, weight
