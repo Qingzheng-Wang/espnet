@@ -7,6 +7,7 @@ from glob import glob
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.multiprocessing.spawn import ProcessContext
 
 from espnet2.torch_utils.model_summary import model_summary
@@ -204,6 +205,7 @@ def extract_embed_lid(args):
                     continue
                 embds_array = np.stack(embds, axis=0)  # Stack list of ndarrays into a single ndarray
                 avg_embd = np.mean(embds_array, axis=0)  # Compute mean along the first axis
+                avg_embd = F.normalize(torch.from_numpy(avg_embd), p=2, dim=0).numpy()
                 lang_to_avg_embd_dic[lang_id] = avg_embd
             np.savez(
                 f"{args.output_dir}/{set_name}_lang_to_avg_embd",
