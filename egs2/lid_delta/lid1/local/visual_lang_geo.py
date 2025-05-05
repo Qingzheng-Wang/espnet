@@ -43,6 +43,11 @@ def parse_args():
         nargs='+',
     )
     parser.add_argument(
+        "--spk2utt",
+        type=str,
+        help="Path to the spk2utt file for the set to visualize",
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         default=".",
@@ -54,7 +59,16 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    iso_codes = args.iso_codes
+    if args.iso_codes is not None:
+        iso_codes = args.iso_codes
+    elif args.spk2utt is not None:
+        iso_codes = []
+        with open(args.spk2utt, "r") as f:
+            for line in f:
+                lang = line[:3]
+                iso_codes.append(lang)
+    else:
+        raise ValueError("Either --iso_codes or --spk2utt must be provided.")
     output_html = os.path.join(args.output_dir, "language_map.html")
     output_png = os.path.join(args.output_dir, "language_map.png")
 
