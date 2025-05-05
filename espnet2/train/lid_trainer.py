@@ -2,7 +2,7 @@
 Trainer module for language identification and language embedding extraction.
 """
 
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import torch
@@ -44,8 +44,8 @@ class LIDTrainer(Trainer):
         resume: bool = True,
         lang_to_embds_dic: Dict[str, List[np.ndarray]] = None,
         save_embd_per_utt: bool = False,
-        max_num_utt_per_lang: int = None,
-        lang_counter_dic: Dict[str, int] = None,
+        max_num_utt_per_lang: Optional[int] = None,
+        lang_counter_dic: Optional[Dict[str, int]] = None,
     ) -> None: 
         """
         Extract language embedding and language id for each utterance in the dataset.
@@ -205,7 +205,8 @@ class LIDTrainer(Trainer):
                                 for uid, lid in lang_id_dic.items():
                                     f.write(f"{uid} {lid}\n")
                             logging.info(f"[Rank {rank}] Saved {len(lang_id_dic)} utts at step {step}")
-                            logging.info(f"[Rank {rank}] Current lang_counter_dic: {lang_counter_dic}")
+                            if max_num_utt_per_lang is not None and lang_counter_dic is not None:
+                                logging.info(f"[Rank {rank}] Current lang_counter_dic: {lang_counter_dic}")
                             if extract_embd:
                                 lang_embd_dic.clear()
                             lang_id_dic.clear()
