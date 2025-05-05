@@ -1,0 +1,1 @@
+/work/nvme/bbjs/jsun5/espnet/egs2/voxpopuli/lid1/local/prepare_voxpopuli.py
