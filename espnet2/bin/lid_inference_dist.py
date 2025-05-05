@@ -285,7 +285,7 @@ def gen_tsne_plot(
     labels = []
 
     logging.info("Preparing embeddings and labels...")
-    for lang_id, embds in lang_to_embds_dic.items():
+    for lang_id, embds in sorted(lang_to_embds_dic.items()):
         if isinstance(embds, list):  # A list of embeddings for each language
             for embd in embds:
                 embeddings.append(embd)
@@ -373,6 +373,9 @@ def gen_tsne_plot(
     # Save as HTML (interactive)
     plot_file = f"{output_dir}/tsne_plot_{plot_name}.html"
     fig.write_html(plot_file)
+
+    # =========== Save tsne results to CSV ===========
+    df.to_csv(f"{output_dir}/tsne_results_{plot_name}.csv", index=False)
 
 def get_parser():
     parser = config_argparse.ArgumentParser(
