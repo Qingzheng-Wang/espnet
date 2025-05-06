@@ -4,6 +4,11 @@
 . ./cmd.sh || exit 1;
 . ./db.sh || exit 1;
 
+log() {
+    local fname=${BASH_SOURCE[1]##*/}
+        echo -e "$(date '+%Y-%m-%dT%H:%M:%S') (${fname}:${BASH_LINENO[0]}:${FUNCNAME[1]}) $*"
+}
+
 # parse args
 dump_dir=dump/raw
 train_set=
@@ -12,49 +17,55 @@ test_sets=
 . utils/parse_options.sh || exit 1;
 
 if [ -z "${dump_dir}" ] || [ -z "${train_set}" ] || [ -z "${test_sets}" ]; then
-    echo "Usage: $0 --dump_dir <dump_dir> --train_set <train_set> --test_sets <test_sets>"
+    log "Usage: $0 --dump_dir <dump_dir> --train_set <train_set> --test_sets <test_sets>"
     exit 1
 fi
 
-# check if the dump_dir exists
-if [ ! -d "${dump_dir}" ]; then
-    echo "Error: dump_dir ${dump_dir} does not exist."
-    exit 1
-fi
-# check if the train_set exists
-if [ ! -d "${dump_dir}/${train_set}" ]; then
-    echo "Error: train_set ${train_set} does not exist in ${dump_dir}."
-    exit 1
-fi
-# check if the test_sets exists
-for test_set in ${test_sets}; do
-    if [ ! -d "${dump_dir}/${test_set}" ]; then
-        echo "Error: test_set ${test_set} does not exist in ${dump_dir}."
+# check dir exist
+for dir in "${train_set}" ${test_sets}; do
+    if [ ! -d "${dump_dir}/${dir}" ]; then
+        log "Error: ${dump_dir}/${dir} does not exist."
         exit 1
     fi
 done
 
-python local/prepare_ood_test.py \
-    --dump_dir ${dump_dir} \
-    --train_set ${train_set} \
-    --test_sets "${test_sets}" \
-    "$@"
-
+# cross set names
 cross_sets=""
 for test_set in ${test_sets}; do
     cross_set="${test_set}_cross_${train_set}"
     cross_sets="${cross_sets} ${cross_set}"
 done
-for cross_set in ${cross_sets}; do
-    if [ ! -d "${dump_dir}/${cross_set}" ]; then
-        if [ -f "${dump_dir}/${cross_set}/utt2spk" ]; then
-            ./utils/utt2spk_to_spk2utt.pl ${dump_dir}/${cross_set}/utt2spk > ${dump_dir}/${cross_set}/spk2utt
-            cp ${dump_dir}/${cross_set}/spk2utt ${dump_dir}/${cross_set}/category2utt 
-        else
-            echo "Error: File ${dump_dir}/${cross_set}/utt2spk does not exist."
-            exit 1
-        fi
+
+read -r -a cross_sets_array <<< "${cross_sets}"
+read -r -a test_sets_array <<< "${test_sets}"
+test_sets_renew=""
+cross_sets_renew=""
+for i in "${!cross_sets_array[@]}"; do
+    cross_set="${cross_sets_array[$i]}"
+    test_set="${test_sets_array[$i]}"
+
+    if [ -d "${dump_dir}/${cross_set}" ]; then
+        log "Warning: cross_set ${cross_set} already exists in ${dump_dir}. Skipping preparation."
+        continue
     fi
+
+    test_sets_renew+="${test_set} "
+    cross_sets_renew+="${cross_set} "
 done
 
-echo "Successfully prepared OOD test sets to ${cross_sets}."
+if [ -z "${test_sets_renew}" ]; then
+    log "All cross_sets already exist."
+    exit 0
+fi
+
+python local/prepare_ood_test.py \
+    --dump_dir ${dump_dir} \
+    --train_set ${train_set} \
+    --test_sets "${test_sets_renew}"
+
+for cross_set in ${cross_sets_renew}; do
+    ./utils/utt2spk_to_spk2utt.pl ${dump_dir}/${cross_set}/utt2spk > ${dump_dir}/${cross_set}/spk2utt
+    cp ${dump_dir}/${cross_set}/spk2utt ${dump_dir}/${cross_set}/category2utt
+done
+
+log "Successfully prepared the following OOD test sets: ${cross_sets_renew}"
