@@ -96,7 +96,7 @@ class AAMSoftmaxSCTopKLang2Vec(AbsLoss):
                 self.lang2vec_head = nn.Sequential(
                     nn.Linear(nout, lang2vec_dim),
                 )
-                self.lang2vec_loss = nn.BCEWithLogitsLoss() # first sigmoid, then BCE, this benefits autocast than Sigmoid + BCE
+                self.lang2vec_loss = nn.BCEWithLogitsLoss() # BCEWithLogitsLoss combines sigmoid and binary cross entropy, which use the log-sum-exp trick for numerical stability.
             else:
                 raise ValueError(f"Unknown lang2vec type: {lang2vec_type}, support lang2vec types: geo, phonology_knn, syntax_knn, inventory_knn")
 
