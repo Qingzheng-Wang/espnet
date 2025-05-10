@@ -120,6 +120,8 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
         # Must transfer speech_lengths to extract_feats to get correct feat_lengths
         feats, feat_lengths = self.extract_feats(speech, speech_lengths)
         frame_level_feats = self.encode_frame(feats)
+        if isinstance(frame_level_feats, tuple):
+            frame_level_feats, feat_lengths = frame_level_feats
         intermediate_lang_embds = None
         if isinstance(frame_level_feats, tuple):
             frame_level_feats, intermediate_lang_embds = frame_level_feats
@@ -135,27 +137,33 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
         if lang2vecs is not None:
             loss, accuracy, pred_lids, class_loss, lang2vec_loss  = self.loss(lang_embd, lid_labels, lang2vecs)
             lang2vec_type = self.loss.lang2vec_type
-            stats[f"{lang2vec_type}_loss"] = lang2vec_loss.detach()
             stats["class_loss"] = class_loss.detach()
+            if lang2vec_loss is not None: # lang2vec_loss is None when setting apply_last to False in the loss
+                stats[f"{lang2vec_type}_loss_last_layer"] = lang2vec_loss.detach()
 
+            # Calculate intermediate lang2vec loss
             if intermediate_lang_embds is not None and self.inter_lang2vec_loss_weight > 0:
                 inter_lang2vec_losses = self._calc_intermediate_lang2vec_pred_loss(intermediate_lang_embds, lang2vecs)
                 inter_lang2vec_loss_mean = 0.0
                 
                 for layer_idx, inter_lang2vec_loss in zip(self.encoder.inter_lang2vec_layers, inter_lang2vec_losses):
-                    inter_lang2vec_loss = inter_lang2vec_loss.detach()
-                    stats[f"inter_{lang2vec_type}_layer{layer_idx}"] = inter_lang2vec_loss
+                    stats[f"inter_{lang2vec_type}_loss_layer{layer_idx}"] = inter_lang2vec_loss.detach()
                     inter_lang2vec_loss_mean += inter_lang2vec_loss
                 
                 inter_lang2vec_loss_mean /= len(inter_lang2vec_losses)
-                stats[f"inter_{lang2vec_type}_loss_mean"] = inter_lang2vec_loss_mean
-                lang2vec_loss = (
-                    (1 - self.inter_lang2vec_loss_weight) * lang2vec_loss + 
-                    self.inter_lang2vec_loss_weight * inter_lang2vec_loss_mean
-                )
+                stats[f"inter_{lang2vec_type}_loss_mean"] = inter_lang2vec_loss_mean.detach()
+
+                lang2vec_loss_all = 0.0
+                if lang2vec_loss is not None:
+                    lang2vec_loss_all += (1 - self.inter_lang2vec_loss_weight) * lang2vec_loss
+                    lang2vec_loss_all += self.inter_lang2vec_loss_weight * inter_lang2vec_loss_mean
+                else:
+                    lang2vec_loss_all = inter_lang2vec_loss_mean
+                
+                stats[f"{lang2vec_type}_loss_all"] = lang2vec_loss_all.detach()
 
                 # recaulculate the loss
-                loss = (1- self.loss.lang2vec_weight) * class_loss + self.loss.lang2vec_weight * lang2vec_loss
+                loss = (1- self.loss.lang2vec_weight) * class_loss + self.loss.lang2vec_weight * lang2vec_loss_all
         else:
             loss, accuracy, pred_lids = self.loss(lang_embd, lid_labels)
             stats["class_loss"] = loss.detach()
@@ -200,6 +208,10 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
     def encode_frame(self, feats: torch.Tensor) -> torch.Tensor:
         frame_level_feats = self.encoder(feats)
 
+        # The return could be:
+        # 1. (xs_pad, intermediate_lang_embds), olens
+        # 2. xs_pad, olens
+        # 3. xs_pad (if encoder not transformer_ecapa)
         return frame_level_feats
 
     def project_lang_embd(self, utt_level_feat: torch.Tensor) -> torch.Tensor:

@@ -226,6 +226,7 @@ class TransformerECAPAEncoder(AbsEncoder):
         self.conditioning_layer = None
         self.use_lang2vec_condition = use_lang2vec_condition
         self.lang2vec_merge_type = lang2vec_merge_type
+        self.lang2vec_merge_layer = None
         if lang2vec_merge_type == "concat_dim":
             self.lang2vec_merge_layer = torch.nn.Linear(
                 transformer_dim * 2,
@@ -233,7 +234,7 @@ class TransformerECAPAEncoder(AbsEncoder):
             )
 
     @property
-    def transformer_dim(self) -> int:
+    def output_size(self) -> int:
         return self._transformer_dim
 
     def forward(
@@ -251,7 +252,7 @@ class TransformerECAPAEncoder(AbsEncoder):
         Returns:
             position embedded tensor and mask
         """
-        masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
+        masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device) # (B, 1, T)
 
         if self.embed is None:
             xs_pad = xs_pad
@@ -283,6 +284,7 @@ class TransformerECAPAEncoder(AbsEncoder):
             intermediate_lang_embds = []
             for layer_idx, encoder_layer in enumerate(self.encoders):
                 xs_pad, masks = encoder_layer(xs_pad, masks)
+                olens = masks.squeeze(1).sum(1) # NOTE: because there are subsampling before transformer, so olens != ilens
 
                 if layer_idx in self.inter_lang2vec_layers:
                     encoder_out = xs_pad
@@ -292,7 +294,7 @@ class TransformerECAPAEncoder(AbsEncoder):
                         encoder_out = self.after_norm(encoder_out)
                     
                     frame_level_feats = self.ecapa_encoder(encoder_out)
-                    utt_level_feat = self.pooling(frame_level_feats, feat_lengths=ilens)
+                    utt_level_feat = self.pooling(frame_level_feats, feat_lengths=olens)
 
                     if self.projector is not None:
                         lang_embd = self.projector(utt_level_feat)
@@ -312,6 +314,10 @@ class TransformerECAPAEncoder(AbsEncoder):
                             xs_pad = self.lang2vec_merge_layer(xs_pad)
                         elif self.lang2vec_merge_type == "concat_time_start":
                             xs_pad = torch.cat([lang2vec_condition, xs_pad], dim=1) # (B, T + 1, transformer_dim)
+                            masks = torch.cat(
+                                [torch.ones(masks.size(0), 1, 1).to(masks.device), masks],
+                                dim=2,
+                            ) # (B, 1, T + 1)
                         elif self.lang2vec_merge_type == "add":
                             xs_pad = xs_pad + lang2vec_condition
                         else:
@@ -323,6 +329,7 @@ class TransformerECAPAEncoder(AbsEncoder):
         if self.normalize_before:
             xs_pad = self.after_norm(xs_pad)
 
+        olens = masks.squeeze(1).sum(1)
         if len(intermediate_lang_embds) > 0:
-            return (xs_pad, intermediate_lang_embds)
-        return xs_pad
+            return (xs_pad, intermediate_lang_embds), olens
+        return xs_pad, olens

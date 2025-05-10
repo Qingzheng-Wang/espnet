@@ -25,6 +25,12 @@ class AAMSoftmaxSCTopKLang2Vec(AbsLoss):
         k_top: number of hard samples
         mp: margin penalty of hard samples
         do_lm: whether do large margin finetune
+
+        NOTE(qingzheng):
+        apply_last: used when use transformer_ecapa, which use lang2vec self-condition
+        on downstream transformer layers, since the lang2vec prediction loss has been
+        applied to the downstream intermediate layers, the lang2vec prediction loss which
+        was on the final layer should be considered to be removed.
     """
 
     def __init__(
@@ -41,6 +47,7 @@ class AAMSoftmaxSCTopKLang2Vec(AbsLoss):
         lang2vec_dim: int = None,
         lang2vec_type: str = None, # geo, phonology_knn, syntax_knn, inventory_knn
         lang2vec_weight: float = None,
+        apply_last: bool = True,
     ):
         super().__init__(nout)
         self.in_features = nout
@@ -81,7 +88,11 @@ class AAMSoftmaxSCTopKLang2Vec(AbsLoss):
         self.lang2vec_dim = lang2vec_dim
         self.lang2vec_type = lang2vec_type
         self.lang2vec_weight = lang2vec_weight
+        self.apply_last = apply_last
 
+        # NOTE(qingzheng): no matter whether apply_last is True or False,
+        # the lang2vec_head, lang2vec_loss should be initialized, because 
+        # when apply_last is False these will be used in the transformer_ecapa
         if (
             self.lang2vec_dim is not None and 
             self.lang2vec_type is not None and 
@@ -188,8 +199,10 @@ class AAMSoftmaxSCTopKLang2Vec(AbsLoss):
             lang2vec is not None and
             self.lang2vec_dim is not None and 
             self.lang2vec_type is not None and 
-            self.lang2vec_weight is not None
+            self.lang2vec_weight is not None and
+            self.apply_last
         ):
+            assert 0 < self.lang2vec_weight < 1, f"lang2vec_weight should be in (0, 1), but got {self.lang2vec_weight}"
             lang2vec_loss = self.lang2vec_loss(self.lang2vec_head(input), lang2vec)
             loss *= (1 - self.lang2vec_weight)
             loss += self.lang2vec_weight * lang2vec_loss
