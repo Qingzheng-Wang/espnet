@@ -5,6 +5,9 @@ import numpy as np
 import torch
 from typeguard import typechecked
 
+from espnet2.train.abs_espnet_model import AbsESPnetModel
+from espnet2.lid.espnet_model import ESPnetLIDModel
+from espnet2.lid.espnet_model_downstream_lang2vec_condition import ESPnetLIDDownstreamLang2VecConditionModel
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.asteroid_frontend import AsteroidFrontend
@@ -25,7 +28,7 @@ from espnet2.spk.encoder.projector_encoder import ProjectorEncoder
 from espnet2.spk.encoder.rawnet3_encoder import RawNet3Encoder
 from espnet2.spk.encoder.ska_tdnn_encoder import SkaTdnnEncoder
 from espnet2.spk.encoder.xvector_encoder import XvectorEncoder
-from espnet2.lid.espnet_model import ESPnetLIDModel
+from espnet2.lid.encoder.transformer_ecapa import TransformerECAPAEncoder
 from espnet2.lid.loss.aamsoftmax import AAMSoftmax
 from espnet2.lid.loss.aamsoftmax_subcenter_intertopk import (
     ArcMarginProduct_intertopk_subcenter,
@@ -55,6 +58,16 @@ from espnet2.train.lid_trainer import LIDTrainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import int_or_none, str2bool, str_or_none
+
+model_choices = ClassChoices(
+    "model",
+    classes=dict(
+        espnet=ESPnetLIDModel,
+        downstream_lang2vec_condition=ESPnetLIDDownstreamLang2VecConditionModel,
+    ),
+    type_check=AbsESPnetModel,
+    default="espnet",
+)
 
 # Check and understand
 frontend_choices = ClassChoices(
@@ -101,6 +114,7 @@ encoder_choices = ClassChoices(
         ska_tdnn=SkaTdnnEncoder,
         xvector=XvectorEncoder,
         projector=ProjectorEncoder,
+        transformer_ecapa=TransformerECAPAEncoder,
     ),
     type_check=AbsEncoder,
     default="rawnet3",
@@ -343,7 +357,8 @@ class LIDTask(AbsTask):
             nout=projector_output_size, nclasses=args.spk_num, **args.loss_conf
         )
 
-        model = ESPnetLIDModel(
+        model_class = model_choices.get_class(args.model)
+        model = model_class(
             frontend=frontend,
             specaug=specaug,
             normalize=normalize,
@@ -351,7 +366,7 @@ class LIDTask(AbsTask):
             pooling=pooling,
             projector=projector,
             loss=loss,
-            # **args.model_conf, # uncomment when model_conf exists
+            **args.model_conf,
         )
 
         if args.init is not None:
