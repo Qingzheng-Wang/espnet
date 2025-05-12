@@ -15,10 +15,10 @@ from espnet2.lid.loss.abs_loss import AbsLoss
 from espnet2.lid.pooling.abs_pooling import AbsPooling
 from espnet2.spk.projector.abs_projector import AbsProjector
 from espnet2.torch_utils.device_funcs import force_gatherable
-from espnet2.train.abs_espnet_model import AbsESPnetModel
+from espnet2.lid.espnet_model import ESPnetLIDModel
 
 
-class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
+class ESPnetLIDDownstreamLang2VecConditionModel(ESPnetLIDModel):
     """ESPnet LID model
     Support for language identification and language embedding extraction.
     This model is modified from ESPnetSpeakerModel.
@@ -38,37 +38,28 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
         inter_lang2vec_loss_weight: float = 0.0,
     ):
 
-        super().__init__()
-
-        self.frontend = frontend
-        self.specaug = specaug
-        self.normalize = normalize
-        self.encoder = encoder
-        self.pooling = pooling
-        self.projector = projector
-        self.loss = loss
-
-        assert len(self.encoder.lang2vec_condition_layer_idx) > 0, (
-            "if use_lang2vec_condition is True, the lang2vec_condition_layer_idx "
-            "should be set in the encoder."
-            f"Got {self.encoder.lang2vec_condition_layer_idx}"
+        super().__init__(
+            frontend=frontend,
+            specaug=specaug,
+            normalize=normalize,
+            encoder=encoder,
+            pooling=pooling,
+            projector=projector,
+            loss=loss,
         )
+
         self.encoder.pooling = self.pooling
         self.encoder.projector = self.projector
-        try:
-            self.encoder.lang2vec_head = self.loss.lang2vec_head
-            self.encoder.lang2vec_type = self.loss.lang2vec_type
-        except AttributeError:
-            raise ValueError(
-                f"The loss type {self.loss.__class__.__name__} does not have lang2vec_head."
-            )
+        self.encoder.lang2vec_head = getattr(self.loss, "lang2vec_head", None)
+        self.encoder.lang2vec_type = getattr(self.loss, "lang2vec_type", None)
+        self.encoder.use_lang2vec_condition = use_lang2vec_condition
         
         # NOTE(qingzheng): if use_lang2vec_condition is True, use self-conditioning layer
         # else, just compute the lang2vec loss according to the intermediate language embedding outputs
         if use_lang2vec_condition:
             self.encoder.conditioning_layer = torch.nn.Linear(
                 self.loss.lang2vec_dim,
-                self.encoder._transformer_ndim,
+                self.encoder._transformer_dim,
             )
         
         self.inter_lang2vec_loss_weight = inter_lang2vec_loss_weight
@@ -119,12 +110,12 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
         # 1. extract feats
         # Must transfer speech_lengths to extract_feats to get correct feat_lengths
         feats, feat_lengths = self.extract_feats(speech, speech_lengths)
-        frame_level_feats = self.encode_frame(feats)
+        frame_level_feats = self.encode_frame(feats, feat_lengths)
         if isinstance(frame_level_feats, tuple):
             frame_level_feats, feat_lengths = frame_level_feats
-        intermediate_lang_embds = None
+        intermediate_lang2vec_preds = None
         if isinstance(frame_level_feats, tuple):
-            frame_level_feats, intermediate_lang_embds = frame_level_feats
+            frame_level_feats, intermediate_lang2vec_preds = frame_level_feats
 
         # 2. aggregation into utterance-level
         utt_level_feat = self.pooling(frame_level_feats, task_tokens, feat_lengths)
@@ -135,15 +126,15 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
         # 4. calculate loss
         # NOTE: if lid_labels is None, loss and accuracy are None
         if lang2vecs is not None:
-            loss, accuracy, pred_lids, class_loss, lang2vec_loss  = self.loss(lang_embd, lid_labels, lang2vecs)
+            loss, accuracy, pred_lids, class_loss, lang2vec_loss = self.loss(lang_embd, lid_labels, lang2vecs)
             lang2vec_type = self.loss.lang2vec_type
             stats["class_loss"] = class_loss.detach()
             if lang2vec_loss is not None: # lang2vec_loss is None when setting apply_last to False in the loss
                 stats[f"{lang2vec_type}_loss_last_layer"] = lang2vec_loss.detach()
 
             # Calculate intermediate lang2vec loss
-            if intermediate_lang_embds is not None and self.inter_lang2vec_loss_weight > 0:
-                inter_lang2vec_losses = self._calc_intermediate_lang2vec_pred_loss(intermediate_lang_embds, lang2vecs)
+            if intermediate_lang2vec_preds is not None and self.inter_lang2vec_loss_weight > 0:
+                inter_lang2vec_losses = self._calc_intermediate_lang2vec_pred_loss(intermediate_lang2vec_preds, lang2vecs)
                 inter_lang2vec_loss_mean = 0.0
                 
                 for layer_idx, inter_lang2vec_loss in zip(self.encoder.inter_lang2vec_layers, inter_lang2vec_losses):
@@ -154,7 +145,7 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
                 stats[f"inter_{lang2vec_type}_loss_mean"] = inter_lang2vec_loss_mean.detach()
 
                 lang2vec_loss_all = 0.0
-                if lang2vec_loss is not None:
+                if lang2vec_loss is not None: # which means do not apply lang2vec loss on the last layer
                     lang2vec_loss_all += (1 - self.inter_lang2vec_loss_weight) * lang2vec_loss
                     lang2vec_loss_all += self.inter_lang2vec_loss_weight * inter_lang2vec_loss_mean
                 else:
@@ -165,7 +156,11 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
                 # recaulculate the loss
                 loss = (1- self.loss.lang2vec_weight) * class_loss + self.loss.lang2vec_weight * lang2vec_loss_all
         else:
-            loss, accuracy, pred_lids = self.loss(lang_embd, lid_labels)
+            # NOTE(qingzheng): if use aamsoftmax_sc_topk_lang2vec loss but not 
+            # specify the lang2vec in preprocessor, it will jump to this branch,
+            # but aamsoftmax_sc_topk_lang2vec default return 5 outputs, so use [:3]
+            # to restrict here only retrieve the first 3 outputs
+            loss, accuracy, pred_lids = self.loss(lang_embd, lid_labels)[:3] 
             stats["class_loss"] = loss.detach()
 
         if extract_embd:
@@ -178,35 +173,16 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
         return loss, stats, weight
 
-    def extract_feats(
-        self, speech: torch.Tensor, speech_lengths: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        batch_size = speech.shape[0]
-        speech_lengths = (
-            speech_lengths
-            if speech_lengths is not None
-            else torch.ones(batch_size).int() * speech.shape[1]
-        )
-
-        # 1. extract feats
-        if self.frontend is not None:
-            feats, feat_lengths = self.frontend(speech, speech_lengths)
-        else:
-            feats = speech
-            feat_lengths = None
-
-        # 2. apply augmentations
-        if self.specaug is not None and self.training:
-            feats, _ = self.specaug(feats, feat_lengths)
-
-        # 3. normalize
-        if self.normalize is not None:
-            feats, _ = self.normalize(feats, feat_lengths)
-
-        return feats, feat_lengths
-
-    def encode_frame(self, feats: torch.Tensor) -> torch.Tensor:
-        frame_level_feats = self.encoder(feats)
+    def encode_frame(
+            self, 
+            feats: torch.Tensor, 
+            feat_lengths: torch.Tensor
+        ) -> Union[
+            Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor], 
+            Tuple[torch.Tensor, torch.Tensor],
+            torch.Tensor
+        ]:
+        frame_level_feats = self.encoder(feats, feat_lengths)
 
         # The return could be:
         # 1. (xs_pad, intermediate_lang_embds), olens
@@ -214,33 +190,15 @@ class ESPnetLIDDownstreamLang2VecConditionModel(AbsESPnetModel):
         # 3. xs_pad (if encoder not transformer_ecapa)
         return frame_level_feats
 
-    def project_lang_embd(self, utt_level_feat: torch.Tensor) -> torch.Tensor:
-        if self.projector is not None:
-            lang_embd = self.projector(utt_level_feat)
-        else:
-            lang_embd = utt_level_feat
-
-        return lang_embd
-
-    def collect_feats(
-        self,
-        speech: torch.Tensor,
-        speech_lengths: torch.Tensor,
-        lid_labels: torch.Tensor = None,
-        **kwargs,
-    ) -> Dict[str, torch.Tensor]:
-        feats, feats_lengths = self.extract_feats(speech, speech_lengths)
-        return {"feats": feats}
-
     def _calc_intermediate_lang2vec_pred_loss(
         self,
-        intermediate_lang_embds: List[torch.Tensor],
+        intermediate_lang2vec_preds: List[torch.Tensor],
         lang2vecs: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> List[torch.Tensor]:
         inter_lang2vec_losses = []
-        for intermediate_lang_embd in intermediate_lang_embds:
+        for intermediate_lang2vec_pred in intermediate_lang2vec_preds:
             inter_lang2vec_loss = self.loss.lang2vec_loss(
-                self.loss.lang2vec_head(intermediate_lang_embd),
+                intermediate_lang2vec_pred,
                 lang2vecs,
             )
             inter_lang2vec_losses.append(inter_lang2vec_loss)

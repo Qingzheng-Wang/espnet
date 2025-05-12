@@ -76,8 +76,8 @@ class TransformerECAPAEncoder(AbsEncoder):
         self,
         # === Transformer Related Arguments ===
         input_size: int,
-        transformer_dim: int = 256,
-        attention_heads: int = 4,
+        transformer_dim: int = 512,
+        attention_heads: int = 8,
         linear_units: int = 2048,
         num_blocks: int = 6,
         dropout_rate: float = 0.1,
@@ -95,11 +95,10 @@ class TransformerECAPAEncoder(AbsEncoder):
         use_flash_attn: bool = True,
         # === ECAPA Related Arguments ===
         ecapa_scale: int = 8,
-        ecapa_dim: int = 1024,
+        ecapa_dim: int = 512,
         ecapa_output_size: int = 1536,
         # === Intermediate Lang2Vec Related Arguments ===
         inter_lang2vec_layers: List[int] = [],
-        use_lang2vec_condition: bool = False,
         lang2vec_merge_type: str = "concat_dim", # concat_dim, concat_time_start, add
     ):
         super().__init__()
@@ -224,7 +223,8 @@ class TransformerECAPAEncoder(AbsEncoder):
         self.lang2vec_head = None
         self.lang2vec_type = None
         self.conditioning_layer = None
-        self.use_lang2vec_condition = use_lang2vec_condition
+        self.ecapa_output_size = ecapa_output_size
+        self.use_lang2vec_condition = None # assigned in espnet_model
         self.lang2vec_merge_type = lang2vec_merge_type
         self.lang2vec_merge_layer = None
         if lang2vec_merge_type == "concat_dim":
@@ -233,9 +233,8 @@ class TransformerECAPAEncoder(AbsEncoder):
                 transformer_dim,
             )
 
-    @property
     def output_size(self) -> int:
-        return self._transformer_dim
+        return self.ecapa_output_size
 
     def forward(
         self,
@@ -252,7 +251,7 @@ class TransformerECAPAEncoder(AbsEncoder):
         Returns:
             position embedded tensor and mask
         """
-        masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device) # (B, 1, T)
+        masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device) # (B, 1, T), pad place is 0
 
         if self.embed is None:
             xs_pad = xs_pad
@@ -276,12 +275,12 @@ class TransformerECAPAEncoder(AbsEncoder):
         else:
             xs_pad = self.embed(xs_pad)
 
-        intermediate_lang_embds = None
+        intermediate_lang2vec_preds = None
         if len(self.inter_lang2vec_layers) == 0:
             for layer_idx, encoder_layer in enumerate(self.encoders):
                 xs_pad, masks = encoder_layer(xs_pad, masks)
         else:
-            intermediate_lang_embds = []
+            intermediate_lang2vec_preds = []
             for layer_idx, encoder_layer in enumerate(self.encoders):
                 xs_pad, masks = encoder_layer(xs_pad, masks)
                 olens = masks.squeeze(1).sum(1) # NOTE: because there are subsampling before transformer, so olens != ilens
@@ -300,11 +299,12 @@ class TransformerECAPAEncoder(AbsEncoder):
                         lang_embd = self.projector(utt_level_feat)
                     else:
                         lang_embd = utt_level_feat
-                    intermediate_lang_embds.append(lang_embd)
-                
+    
                     lang2vec_pred = self.lang2vec_head(lang_embd)
                     if self.lang2vec_type in ["phonology_knn", "syntax_knn", "inventory_knn"]:
                         lang2vec_pred = torch.sigmoid(lang2vec_pred)
+                    
+                    intermediate_lang2vec_preds.append(lang2vec_pred)
 
                     if self.use_lang2vec_condition:
                         lang2vec_condition = self.conditioning_layer(lang2vec_pred) # (B, transformer_dim)
@@ -315,7 +315,7 @@ class TransformerECAPAEncoder(AbsEncoder):
                         elif self.lang2vec_merge_type == "concat_time_start":
                             xs_pad = torch.cat([lang2vec_condition, xs_pad], dim=1) # (B, T + 1, transformer_dim)
                             masks = torch.cat(
-                                [torch.ones(masks.size(0), 1, 1).to(masks.device), masks],
+                                [torch.ones(masks.size(0), 1, 1, dtype=masks.dtype).to(masks.device), masks],
                                 dim=2,
                             ) # (B, 1, T + 1)
                         elif self.lang2vec_merge_type == "add":
@@ -328,8 +328,10 @@ class TransformerECAPAEncoder(AbsEncoder):
 
         if self.normalize_before:
             xs_pad = self.after_norm(xs_pad)
+        
+        xs_pad = self.ecapa_encoder(xs_pad)
 
         olens = masks.squeeze(1).sum(1)
-        if len(intermediate_lang_embds) > 0:
-            return (xs_pad, intermediate_lang_embds), olens
+        if intermediate_lang2vec_preds is not None and len(intermediate_lang2vec_preds) > 0:
+            return (xs_pad, intermediate_lang2vec_preds), olens
         return xs_pad, olens
