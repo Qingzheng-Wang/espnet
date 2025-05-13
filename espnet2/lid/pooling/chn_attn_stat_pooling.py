@@ -63,6 +63,7 @@ class ChnAttnStatPooling(AbsPooling):
 
         w = self.attention(global_x)
         if feat_lengths is not None:
+            # apply padding mask
             padding_mask = torch.arange(t).expand(x.size(0), t).to(x.device) >= feat_lengths.unsqueeze(1) # (batch, seq_len)
             w = w.masked_fill(padding_mask.unsqueeze(1), torch.finfo(w.dtype).min)
         w = self.softmax(w)

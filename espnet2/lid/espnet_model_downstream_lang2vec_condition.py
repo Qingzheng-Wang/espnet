@@ -51,7 +51,6 @@ class ESPnetLIDDownstreamLang2VecConditionModel(ESPnetLIDModel):
         self.encoder.pooling = self.pooling
         self.encoder.projector = self.projector
         self.encoder.lang2vec_head = getattr(self.loss, "lang2vec_head", None)
-        self.encoder.lang2vec_type = getattr(self.loss, "lang2vec_type", None)
         self.encoder.use_lang2vec_condition = use_lang2vec_condition
         
         # NOTE(qingzheng): if use_lang2vec_condition is True, use self-conditioning layer
@@ -130,7 +129,7 @@ class ESPnetLIDDownstreamLang2VecConditionModel(ESPnetLIDModel):
             lang2vec_type = self.loss.lang2vec_type
             stats["class_loss"] = class_loss.detach()
             if lang2vec_loss is not None: # lang2vec_loss is None when setting apply_last to False in the loss
-                stats[f"{lang2vec_type}_loss_last_layer"] = lang2vec_loss.detach()
+                stats[f"{lang2vec_type}_loss_downstream"] = lang2vec_loss.detach()
 
             # Calculate intermediate lang2vec loss
             if intermediate_lang2vec_preds is not None and self.inter_lang2vec_loss_weight > 0:

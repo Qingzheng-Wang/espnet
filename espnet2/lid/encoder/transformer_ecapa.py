@@ -221,7 +221,6 @@ class TransformerECAPAEncoder(AbsEncoder):
         self.pooling = None
         self.projector = None
         self.lang2vec_head = None
-        self.lang2vec_type = None
         self.conditioning_layer = None
         self.ecapa_output_size = ecapa_output_size
         self.use_lang2vec_condition = None # assigned in espnet_model
@@ -301,8 +300,6 @@ class TransformerECAPAEncoder(AbsEncoder):
                         lang_embd = utt_level_feat
     
                     lang2vec_pred = self.lang2vec_head(lang_embd)
-                    if self.lang2vec_type in ["phonology_knn", "syntax_knn", "inventory_knn"]:
-                        lang2vec_pred = torch.sigmoid(lang2vec_pred)
                     
                     intermediate_lang2vec_preds.append(lang2vec_pred)
 

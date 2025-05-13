@@ -104,7 +104,7 @@ class ESPnetLIDModel(AbsESPnetModel):
         # NOTE: if lid_labels is None, loss and accuracy are None
         class_loss = None
         if lang2vecs is not None:
-            loss, accuracy, pred_lids, class_loss, lang2vec_loss  = self.loss(lang_embd, lid_labels, lang2vecs)
+            loss, accuracy, pred_lids, class_loss, lang2vec_loss = self.loss(lang_embd, lid_labels, lang2vecs)
         else:
             loss, accuracy, pred_lids = self.loss(lang_embd, lid_labels)
 

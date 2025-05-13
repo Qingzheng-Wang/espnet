@@ -100,6 +100,7 @@ class EBranchformerECAPAEncoder(AbsEncoder):
     ):
         super().__init__()
         self._ebrachformer_dim = ebrachformer_dim
+        self._transformer_dim = ebrachformer_dim # TODO: to be changed to model_dim for both ebranchformer_ecapa and transformer_ecapa
 
         if rel_pos_type == "legacy":
             if pos_enc_layer_type == "rel_pos":
@@ -324,7 +325,6 @@ class EBranchformerECAPAEncoder(AbsEncoder):
         self.pooling = None
         self.projector = None
         self.lang2vec_head = None
-        self.lang2vec_type = None
         self.conditioning_layer = None
         self.ecapa_output_size = ecapa_output_size
         self.use_lang2vec_condition = None # assigned in espnet_model
@@ -403,8 +403,6 @@ class EBranchformerECAPAEncoder(AbsEncoder):
                         lang_embd = utt_level_feat
     
                     lang2vec_pred = self.lang2vec_head(lang_embd)
-                    if self.lang2vec_type in ["phonology_knn", "syntax_knn", "inventory_knn"]:
-                        lang2vec_pred = torch.sigmoid(lang2vec_pred)
                     
                     intermediate_lang2vec_preds.append(lang2vec_pred)
 
