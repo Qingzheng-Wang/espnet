@@ -1,0 +1,140 @@
+# ECAPA-TDNN reproduce recipe configuration.
+
+# Model
+model: downstream_lang2vec_condition
+model_conf:
+  use_lang2vec_condition: false # ⚠️ if use lang2vec condition, set true
+  inter_lang2vec_loss_weight: 0.0
+
+# Frontend
+frontend: s3prl
+frontend_conf:
+    frontend_conf:
+        upstream: hf_wav2vec2_custom
+        path_or_url: facebook/mms-1b
+    download_dir: ./hub
+    multilayer_feature: True
+
+# Normalizer
+normalize: utterance_mvn
+normalize_conf:
+    norm_vars: false
+
+# Encoder
+encoder: ebranchformer_ecapa
+encoder_conf:
+  # === EBranchformer ===
+  ebrachformer_dim: 512
+  attention_heads: 8
+  attention_layer_type: rel_selfattn
+  pos_enc_layer_type: rel_pos
+  rel_pos_type: latest
+  cgmlp_linear_units: 2048
+  cgmlp_conv_kernel: 31
+  use_linear_after_conv: false
+  gate_activation: identity
+  num_blocks: 2
+  dropout_rate: 0.1
+  positional_dropout_rate: 0.1
+  attention_dropout_rate: 0.1
+  input_layer: conv2d2
+  layer_drop_rate: 0.0
+  linear_units: 2048
+  positionwise_layer_type: linear
+  use_ffn: true
+  macaron_ffn: true
+  merge_conv_kernel: 31
+  use_flash_attn: true
+  # === ECAPA ===
+  ecapa_scale: 8
+  ecapa_dim: 512
+  ecapa_output_size: 1536
+  # inter_lang2vec_layers: 
+  # lang2vec_merge_type: 
+
+# Pooling
+pooling: chn_attn_stat
+
+# Projector
+projector: rawnet3
+projector_conf:
+  output_size: 192
+
+# Preprocessor
+preprocessor: lid
+preprocessor_conf:
+  fix_duration: False
+  sample_rate: 16000
+  noise_apply_prob: 0.0
+  noise_info:
+  - [1.0, 'dump/raw/musan_speech.scp', [4, 7], [13, 20]]
+  - [1.0, 'dump/raw/musan_noise.scp', [1, 1], [0, 15]] # prob, noise_scp, num_to_mix, db_range
+  - [1.0, 'dump/raw/musan_music.scp', [1, 1], [5, 15]]
+  rir_apply_prob: 0.0
+  rir_scp: dump/raw/rirs.scp
+  use_lang2vec: false
+  lang2vec_type: null # ⚠️ If change the lang2vec_type, change three ⚠️ places
+
+# Loss
+loss: aamsoftmax_sc_topk_lang2vec
+loss_conf:
+  margin: 0.5
+  scale: 30
+  K: 3
+  mp: 0.06
+  k_top: 5
+  lang2vec_dim: null # ⚠️ geo: 299, phonology_knn: 28, syntax_knn: 103, inventory_knn: 158
+  lang2vec_type: null # ⚠️
+  lang2vec_weight: null
+  apply_last: false # default apply on the last layer, if only want to use inter lang2vec loss, set false
+
+# Training related
+num_att_plot: 0
+num_workers: 8
+cudnn_deterministic: false
+cudnn_benchmark: true
+
+log_interval: 100
+unused_parameters: true
+use_amp: true
+keep_nbest_models: 2
+grad_clip: 9999 # equals to no clip
+best_model_criterion:
+- - valid
+  - accuracy
+  - max
+
+# data iterator
+iterator_type: category
+valid_iterator_type: category
+seed: 3702
+
+# total training steps: (10k, 20k, 30k, 40k, 50k)
+max_epoch: 30 # total training steps = max_epoch * num_iters_per_epoch / accum_grad
+accum_grad: 2
+num_iters_per_epoch: 1000
+
+# batch sampler
+batch_type: catpow # CategoryPowerSampler, the sampler with an upsampling factor used in MMS
+batch_bins: 2880000 # 1440000: 1.5min(90s), 1920000: 120s, 2880000: 16kHz * 3min (180s), 5760000: 6min (1.5min, 3min, 6min), not exactly 3 min, but over 3 min then stop add more utterances.
+max_batch_size: 16
+upsampling_factor: 0.5
+dataset_scaling_factor: 1.2
+drop_last_iter: False
+
+# Optimizer
+optim: adam
+optim_conf:
+  lr: 0.000005 # (1e−5, 3e−5, 3e−6, 5e−6, 7e−6)
+  betas: [0.9, 0.98]
+
+# Scheduler
+scheduler: tristagelr
+scheduler_conf:
+  max_steps: 30000 # must be equal to max_epoch * num_iters_per_epoch / accum_grad
+  warmup_ratio: 0.3
+  hold_ratio: 0.2
+  decay_ratio: 0.5
+  init_lr_scale: 0.6 # start from 3e-6
+  final_lr_scale: 0.1 # end with 5e-7
+
