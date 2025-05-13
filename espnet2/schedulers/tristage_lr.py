@@ -34,12 +34,14 @@ class TristageLR(_LRScheduler, AbsBatchStepScheduler):
     ):
         self.max_steps = max_steps
         self.warmup_steps = int(max_steps * warmup_ratio)
-        assert self.warmup_steps > 0, "The warmup_steps must be greater than 0."
         self.hold_steps = int(max_steps * hold_ratio)
         self.decay_steps = int(max_steps * decay_ratio)
         self.init_lr_scale = init_lr_scale
         self.final_lr_scale = final_lr_scale
-        self.decay_factor = -math.log(final_lr_scale) / self.decay_steps
+        if self.decay_steps != 0:
+            self.decay_factor = -math.log(final_lr_scale) / self.decay_steps
+        else:
+            self.decay_factor = 0.0
 
         super().__init__(optimizer, last_epoch)
     
