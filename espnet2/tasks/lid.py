@@ -8,13 +8,14 @@ from typeguard import typechecked
 from espnet2.train.abs_espnet_model import AbsESPnetModel
 from espnet2.lid.espnet_model import ESPnetLIDModel
 from espnet2.lid.espnet_model_downstream_lang2vec_condition import ESPnetLIDDownstreamLang2VecConditionModel
+from espnet2.lid.espnet_model_upstream_lang2vec_condition import ESPnetLIDUpstreamLang2VecConditionModel
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.asteroid_frontend import AsteroidFrontend
 from espnet2.asr.frontend.default import DefaultFrontend
 from espnet2.asr.frontend.fused import FusedFrontends
 from espnet2.asr.frontend.melspec_torch import MelSpectrogramTorch
-from espnet2.asr.frontend.s3prl import S3prlFrontend
+from espnet2.asr.frontend.s3prl import S3prlFrontend, S3prlFrontendLang2VecCondition
 from espnet2.asr.frontend.windowing import SlidingWindow
 from espnet2.asr.specaug.abs_specaug import AbsSpecAug
 from espnet2.asr.specaug.specaug import SpecAug
@@ -29,6 +30,7 @@ from espnet2.spk.encoder.rawnet3_encoder import RawNet3Encoder
 from espnet2.spk.encoder.ska_tdnn_encoder import SkaTdnnEncoder
 from espnet2.spk.encoder.xvector_encoder import XvectorEncoder
 from espnet2.lid.encoder.transformer_ecapa import TransformerECAPAEncoder
+from espnet2.lid.encoder.ebranchformer_ecapa import EBranchformerECAPAEncoder
 from espnet2.lid.loss.aamsoftmax import AAMSoftmax
 from espnet2.lid.loss.aamsoftmax_subcenter_intertopk import (
     ArcMarginProduct_intertopk_subcenter,
@@ -64,6 +66,7 @@ model_choices = ClassChoices(
     classes=dict(
         espnet=ESPnetLIDModel,
         downstream_lang2vec_condition=ESPnetLIDDownstreamLang2VecConditionModel,
+        upstream_lang2vec_condition=ESPnetLIDUpstreamLang2VecConditionModel,
     ),
     type_check=AbsESPnetModel,
     default="espnet",
@@ -79,6 +82,7 @@ frontend_choices = ClassChoices(
         melspec_torch=MelSpectrogramTorch,
         sliding_window=SlidingWindow,
         s3prl=S3prlFrontend,
+        s3prl_lang2vec_condition=S3prlFrontendLang2VecCondition,
     ),
     type_check=AbsFrontend,
     default=None,
@@ -115,6 +119,7 @@ encoder_choices = ClassChoices(
         xvector=XvectorEncoder,
         projector=ProjectorEncoder,
         transformer_ecapa=TransformerECAPAEncoder,
+        ebranchformer_ecapa=EBranchformerECAPAEncoder,
     ),
     type_check=AbsEncoder,
     default="rawnet3",
@@ -170,6 +175,7 @@ class LIDTask(AbsTask):
     num_optimizers: int = 1
 
     class_choices_list = [
+        model_choices,
         frontend_choices,
         specaug_choices,
         normalize_choices,
@@ -258,13 +264,6 @@ class LIDTask(AbsTask):
             type=str,
             default="",
             help="Directory of the rir data to be augmented",
-        )
-
-        group.add_argument(
-            "--model_conf",
-            action=NestedDictAction,
-            default=get_default_kwargs(ESPnetLIDModel),
-            help="The keyword arguments for model class.",
         )
 
         for class_choices in cls.class_choices_list:
