@@ -75,6 +75,8 @@ qmf_func=false        # Apply quality measurement based calibration in inference
 inference_batch_size=1
 extract_embd=false # Whether to extract embeddings or not
 save_every=1000 # Save every N steps
+# save_embd_per_utt=false # Save embeddings for each utterance
+# save_embd_avg_lang=true # Save average embeddings for each language
 
 # [Task dependent] Set the datadir name created by local/data.sh
 train_set=        # Name of training set.
@@ -210,6 +212,23 @@ if "${skip_upload_hf}"; then
     skip_stages+="10 "
 fi
 
+test_sets_ood="" # out-of-domain test sets
+test_sets_id="" # in-domain test sets
+test_sets_all=""
+train_name=$(echo "${train_set}" | cut -d'_' -f2)
+
+# Check if the test set is in-domain or out-of-domain
+for test_set in ${test_sets}; do
+    test_name=$(echo "${test_set}" | cut -d'_' -f2)
+    if [ "${train_name}" != "${test_name}" ]; then
+        test_sets_ood+="${test_set} "
+        test_sets_all+="${test_set}_cross_${train_set} "
+    else
+        test_sets_id+="${test_set} "
+        test_sets_all+="${test_set} "
+    fi
+done
+
 skip_stages=$(echo "${skip_stages}" | tr ' ' '\n' | sort -nu | tr '\n' ' ')
 log "Skipped stages: ${skip_stages}"
 
@@ -273,9 +292,19 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
             done
             cp data/rirs.scp ${data_feats}/rirs.scp
 
+            _opts=
+            if [ -e data/"${train_set}"/segments ]; then
+                # "segments" is used for splitting wav files which are written in "wav".scp
+                # into utterances. The file format of segments:
+                #   <segment_id> <record_id> <start_time> <end_time>
+                #   "e.g. call-861225-A-0050-0065 call-861225-A 5.0 6.5"
+                # Where the time is written in seconds.
+                _opts+="--segments data/${train_set}/segments "
+            fi
+
             # shellcheck disable=SC2086
             scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                --audio-format "${audio_format}" --fs "${fs}" \
+                --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
                 --multi-columns-input "${multi_columns_input_wav_scp}" \
                 --multi-columns-output "${multi_columns_output_wav_scp}" \
                 "data/${train_set}/wav.scp" "${data_feats}/${train_set}"
@@ -295,9 +324,19 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
             # category2utt will be used by data sampler
             cp data/"${dset}/spk2utt" "${data_feats}/${dset}/category2utt"
 
+            _opts=
+            if [ -e data/"${dset}"/segments ]; then
+                # "segments" is used for splitting wav files which are written in "wav".scp
+                # into utterances. The file format of segments:
+                #   <segment_id> <record_id> <start_time> <end_time>
+                #   "e.g. call-861225-A-0050-0065 call-861225-A 5.0 6.5"
+                # Where the time is written in seconds.
+                _opts+="--segments data/${dset}/segments "
+            fi
+
             # shellcheck disable=SC2086
             scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                --audio-format "${audio_format}" --fs "${fs}" \
+                --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
                 --multi-columns-input "${multi_columns_input_wav_scp}" \
                 --multi-columns-output "${multi_columns_output_wav_scp}" \
                 "data/${dset}/wav.scp" "${data_feats}/${dset}"
@@ -449,7 +488,6 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
             --spk_num $(wc -l ${_spk_train_dir}/spk2utt | cut -f1 -d" ") \
             --fold_length ${fold_length} \
             --valid_shape_file ${spk_stats_dir}/valid/speech_shape \
-            --output_dir "${spk_exp}" \
             ${_opts} ${spk_args}
 fi
 
@@ -458,22 +496,6 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
     log "Stage 6: Language id identification and embedding extraction on test sets."
 
     log "Prepare out-of-domain test sets."
-    test_sets_ood="" # out-of-domain test sets
-    test_sets_id="" # in-domain test sets
-    test_sets_all=""
-    train_name=$(echo "${train_set}" | cut -d'_' -f2)
-
-    # Check if the test set is in-domain or out-of-domain
-    for test_set in ${test_sets}; do
-        test_name=$(echo "${test_set}" | cut -d'_' -f2)
-        if [ "${train_name}" != "${test_name}" ]; then
-            test_sets_ood+="${test_set} "
-            test_sets_all+="${test_set}_cross_${train_set} "
-        else
-            test_sets_id+="${test_set} "
-            test_sets_all+="${test_set} "
-        fi
-    done
 
     # Prepare ood test sets
     if [ -n "${test_sets_ood}" ]; then
@@ -484,8 +506,15 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
             --test_sets "${test_sets_ood}"
     fi
 
+    inference_model_name="${inference_model%.pth}"
+    log "Inference model name: ${inference_model_name}"
+    log "Test sets after being processed: ${test_sets}"
     for test_set in ${test_sets_all}; do
-        infer_exp="${spk_exp}/inference/${test_set}"
+        infer_exp="${spk_exp}/inference/${inference_model_name}/${test_set}"
+        if [ -f "${infer_exp}/${test_set}_lids" ] && [ -f "${infer_exp}/${test_set}_lang_to_list_embds.npz" ]; then
+            log "Skip inference for ${test_set} since it has already been done."
+            continue
+        fi
         _inference_dir=${data_feats}/${test_set}
 
         if echo "${cuda_cmd}" | grep -e queue.pl -e queue-freegpu.pl &> /dev/null; then
@@ -517,21 +546,43 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
                 --extract_embd ${extract_embd} \
                 --save_every ${save_every} \
                 --resume true \
-                --save_embd_per_utt false \
+                --save_embd_per_utt true \
                 --save_embd_avg_lang true \
-                --save_tsne_plot false \
-                ${spk_args}
+                --save_tsne_plot false
     done
 fi
 
 if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
-    log "Stage 7: Plot t-SNE and save language embeddings on train sets."
+    log "Stage 7: Score on the test set."
+    
+    inference_model_name="${inference_model%.pth}"
+    for test_set in ${test_sets_all}; do
+        infer_exp="${spk_exp}/inference/${inference_model_name}/${test_set}"
+
+        if [ -f "${infer_exp}/results" ] && grep -q "Accuracy" "${infer_exp}/results" && grep -q "Macro Accuracy" "${infer_exp}/results"; then
+            log "Skip scoring for ${test_set} since it has already been done and is valid."
+            continue
+        fi
+        pred_lids="${infer_exp}/${test_set}_lids"
+        target_lids="${data_feats}/${test_set}/utt2spk"
+        results="${infer_exp}/results"
+
+        python ./local/score_detailed.py \
+            --pred_lids "${pred_lids}" \
+            --target_lids "${target_lids}" \
+            --results "${results}"
+    done
+fi
+
+if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
+    log "Stage 8: Plot t-SNE and save language embeddings on train sets."
 
     if [ -z "${tsne_set}" ]; then
         tsne_set="${train_set}"
     fi
 
-    infer_exp="${spk_exp}/inference/${tsne_set}"
+    inference_model_name="${inference_model%.pth}"
+    infer_exp="${spk_exp}/inference/${inference_model_name}/${tsne_set}"
     _inference_dir=${data_feats}/${tsne_set}
 
     if echo "${cuda_cmd}" | grep -e queue.pl -e queue-freegpu.pl &> /dev/null; then
@@ -566,24 +617,7 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
             --save_embd_per_utt false \
             --save_embd_avg_lang true \
             --save_tsne_plot true \
-            --max_utt_per_lang_for_tsne 1000 \
-            ${spk_args}
-fi
-
-
-if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
-    log "Stage 8: Score on the test set."
-
-    for test_set in ${test_sets}; do
-        pred_lids="${spk_exp}/inference/${test_set}/${test_set}_lids"
-        target_lids="${data_feats}/${test_set}/utt2spk"
-        results="${spk_exp}/inference/${test_set}/results"
-
-        python ./local/score.py \
-            --pred_lids "${pred_lids}" \
-            --target_lids "${target_lids}" \
-            --results "${results}"
-    done
+            --max_utt_per_lang_for_tsne 1000
 fi
 
 if [ ${stage} -le 9 ] && [ ${stop_stage} -ge 9 ]; then
