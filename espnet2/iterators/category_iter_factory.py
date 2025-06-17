@@ -50,7 +50,7 @@ class CategoryIterFactory(AbsIterFactory):
         self,
         dataset,
         batches: Union[AbsSampler, Sequence[Sequence[Any]]],
-        num_iters_per_epoch: int = None,
+        num_iters_per_epoch: Optional[int] = None,
         seed: int = 0,
         sampler_args: dict = None,
         batch_type: str = "catbel", # or "catpow", "catpow_dataset"
