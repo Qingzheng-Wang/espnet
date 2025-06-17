@@ -1959,8 +1959,6 @@ class AbsTask(ABC):
                 drop_last=args.drop_last_iter,
                 category2utt_file=category2utt_file,
                 epoch=1,
-                num_batches=iter_options.num_batches,
-                distributed=iter_options.distributed,
             )
             batch_sampler = CategoryPowerSampler(**sampler_args)
         elif iter_options.batch_type == "catpow_balance_dataset":
@@ -2002,7 +2000,7 @@ class AbsTask(ABC):
                     torch.distributed.get_world_size() if iter_options.distributed else 1
                 ),
                 max_batch_size=args.max_batch_size,
-                language_upsampling_factor=args.language_upsampling_factor,
+                category_upsampling_factor=args.category_upsampling_factor,
                 dataset_upsampling_factor=args.dataset_upsampling_factor,
                 dataset_scaling_factor=args.dataset_scaling_factor,
                 drop_last=args.drop_last_iter,
@@ -2010,8 +2008,6 @@ class AbsTask(ABC):
                 dataset2utt_file=dataset2utt_file,
                 utt2dataset_file=utt2dataset_file,
                 epoch=1,
-                num_batches=iter_options.num_batches,
-                distributed=iter_options.distributed,
             )
             batch_sampler = CategoryDatasetPowerSampler(**sampler_args)
         else:
