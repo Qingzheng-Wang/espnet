@@ -78,6 +78,7 @@ class CategoryPowerSampler(AbsSampler):
         drop_last: bool = False,
         category2utt_file: Optional[str] = None,
         epoch: int = 1,
+        **kwargs,
     ):
         assert batch_bins > 0
         assert category2utt_file is not None
@@ -279,6 +280,7 @@ class CategoryDatasetPowerSampler(AbsSampler):
         dataset2utt_file: Optional[str] = None,
         utt2dataset_file: Optional[str] = None,
         epoch: int = 1,
+        **kwargs,
     ):
         assert batch_bins > 0
         assert category2utt_file is not None
