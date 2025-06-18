@@ -49,6 +49,7 @@ class ESPnetLIDModel(AbsESPnetModel):
         speech_lengths: torch.Tensor,
         lid_labels: Optional[torch.Tensor] = None,
         extract_embd: bool = False,
+        **kwargs,
     ) -> Union[
         Tuple[torch.Tensor, torch.Tensor],
         Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor],
