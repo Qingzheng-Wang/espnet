@@ -1959,6 +1959,8 @@ class AbsTask(ABC):
                 drop_last=args.drop_last_iter,
                 category2utt_file=category2utt_file,
                 epoch=1,
+                num_batches=iter_options.num_batches,
+                distributed=iter_options.distributed,
             )
             batch_sampler = CategoryPowerSampler(**sampler_args)
         elif iter_options.batch_type == "catpow_balance_dataset":
@@ -2008,6 +2010,8 @@ class AbsTask(ABC):
                 dataset2utt_file=dataset2utt_file,
                 utt2dataset_file=utt2dataset_file,
                 epoch=1,
+                num_batches=iter_options.num_batches,
+                distributed=iter_options.distributed,
             )
             batch_sampler = CategoryDatasetPowerSampler(**sampler_args)
         else:
