@@ -2014,6 +2014,16 @@ class AbsTask(ABC):
                 distributed=iter_options.distributed,
             )
             batch_sampler = CategoryDatasetPowerSampler(**sampler_args)
+        elif iter_options.batch_type == "unsorted":
+            # For plot attention
+            if len(iter_options.shape_files) == 0:
+                key_file = iter_options.data_path_and_name_and_type[0][0]
+            else:
+                key_file = iter_options.shape_files[0]
+            batch_sampler = UnsortedBatchSampler(
+                batch_size=iter_options.batch_size,
+                key_file=key_file,
+            )
         else:
             raise ValueError(f"batch_type={iter_options.batch_type} is not supported")
 
@@ -2042,18 +2052,32 @@ class AbsTask(ABC):
                     )
             batches = [batch[rank::world_size] for batch in batches]
 
-        return CategoryIterFactory(
-            dataset=dataset,
-            batches=batches,
-            seed=args.seed,
-            num_iters_per_epoch=iter_options.num_iters_per_epoch,
-            sampler_args=sampler_args,
-            batch_type=iter_options.batch_type,
-            shuffle=iter_options.train,
-            num_workers=args.num_workers,
-            collate_fn=iter_options.collate_fn,
-            pin_memory=args.ngpu > 0,
-        )
+        if iter_options.batch_type == "unsorted":
+            # For plot attention
+            return SequenceIterFactory(
+                dataset=dataset,
+                batches=batches,
+                seed=args.seed,
+                num_iters_per_epoch=iter_options.num_iters_per_epoch,
+                shuffle=iter_options.train,
+                shuffle_within_batch=args.shuffle_within_batch,
+                num_workers=args.num_workers,
+                collate_fn=iter_options.collate_fn,
+                pin_memory=args.ngpu > 0,
+            )
+        else:
+            return CategoryIterFactory(
+                dataset=dataset,
+                batches=batches,
+                seed=args.seed,
+                num_iters_per_epoch=iter_options.num_iters_per_epoch,
+                sampler_args=sampler_args,
+                batch_type=iter_options.batch_type,
+                shuffle=iter_options.train,
+                num_workers=args.num_workers,
+                collate_fn=iter_options.collate_fn,
+                pin_memory=args.ngpu > 0,
+            )
 
     @classmethod
     @typechecked
