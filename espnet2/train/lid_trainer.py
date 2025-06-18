@@ -94,7 +94,6 @@ class LIDTrainer(Trainer):
         speech_list = []
         speech_length_list = []
         lid_label_list = []
-        task_token = None
 
         if distributed:
             rank = torch.distributed.get_rank()
@@ -124,8 +123,6 @@ class LIDTrainer(Trainer):
                 if num_langs_reach_max_num == len(lang_counter_dic):
                     logging.info(f"[Rank {rank}] All languages reach max_num_utt_per_lang: {max_num_utt_per_lang}.")
                     break
-            if "task_tokens" in batch:
-                task_token = batch["task_tokens"][0]
 
             assert isinstance(batch, dict), type(batch)
             for _utt_id, _speech, _speech_length, _lid_label in zip(
@@ -141,7 +138,12 @@ class LIDTrainer(Trainer):
                         num_recheck += 1
                         continue
                 if _utt_id not in utt_id_whole_list:
-                    if max_num_utt_per_lang is not None and lang_counter_dic is not None:
+                    # Restrict the number of utterances per language when plotting tsne
+                    if (
+                        max_num_utt_per_lang is not None and 
+                        lang_counter_dic is not None and 
+                        _lid_label is not None
+                    ):
                         if lang_counter_dic[idx2lang[_lid_label.item()]] >= max_num_utt_per_lang:
                             logging.info(f"[Rank {rank}] Language {idx2lang[_lid_label.item()]} reach max_num_utt_per_lang: {max_num_utt_per_lang}.")
                             continue
@@ -180,20 +182,11 @@ class LIDTrainer(Trainer):
                         speech_length_list = to_device(
                             speech_length_list, "cuda" if ngpu > 0 else "cpu"
                         )
-
-                        if task_token is None:
-                            task_tokens = None
-                        else:
-                            task_tokens = to_device(
-                                task_token.repeat(speech_list.size(0)),
-                                "cuda" if ngpu > 0 else "cpu",
-                            ).unsqueeze(1)
                         
                         lang_embds, pred_lids = model(
                             speech=speech_list,
                             speech_lengths=speech_length_list,
                             lid_labels=None,
-                            task_tokens=task_tokens,
                             extract_embd=True,
                         ) # [batch_size, dim], [batch_size]
 
@@ -202,7 +195,8 @@ class LIDTrainer(Trainer):
                         pred_lids = [idx2lang[lid.item()] for lid in pred_lids]
 
                         for uid, _lang_embd, _pred_lid, _lid_label_target in zip(utt_id_list, lang_embds, pred_lids, lid_label_list):
-                            if extract_embd:
+                            if extract_embd and _lid_label_target is not None:
+                                # Save lang to embeddings dictionary
                                 _lang_embd_numpy = _lang_embd.detach().cpu().numpy()
                                 target_lid = idx2lang[_lid_label_target.item()]
                                 if distributed:
@@ -213,6 +207,7 @@ class LIDTrainer(Trainer):
                                 else:
                                     lang_to_embds_dic[target_lid].append(_lang_embd_numpy)
                                 lang_embd_dic[uid] = _lang_embd_numpy
+                            
                             lang_id_dic[uid] = _pred_lid
                         
                         # save every `save_every` utterances
@@ -220,13 +215,16 @@ class LIDTrainer(Trainer):
                             if extract_embd and save_embd_per_utt:
                                 # save each middle step results to different files
                                 np.savez(output_dir + f"/embeddings{rank + world_size * step}", **lang_embd_dic)
+                            
                             with open(f"{output_dir}/lids{rank}", "a") as f:
                                 # save all middle step results to the same file
                                 for uid, lid in lang_id_dic.items():
                                     f.write(f"{uid} {lid}\n")
                             logging.info(f"[Rank {rank}] Saved {len(lang_id_dic)} utts at step {step}")
+
                             if max_num_utt_per_lang is not None and lang_counter_dic is not None:
                                 logging.info(f"[Rank {rank}] Current lang_counter_dic: {lang_counter_dic}")
+                            
                             if extract_embd:
                                 lang_embd_dic.clear()
                             lang_id_dic.clear()
@@ -238,6 +236,7 @@ class LIDTrainer(Trainer):
                         lid_label_list = []
 
         if len(utt_id_list) != 0:
+            # Process the remaining utterances in the last batch
             try:
                 speech_list = torch.stack(speech_list, dim=0)
                 speech_length_list = torch.stack(speech_length_list, dim=0) # (bs,)
@@ -248,32 +247,28 @@ class LIDTrainer(Trainer):
                     dim=0
                 )
                 speech_length_list = torch.stack(speech_length_list, dim=0)
+            
             speech_list = to_device(
                 speech_list, "cuda" if ngpu > 0 else "cpu"
             )
             speech_length_list = to_device(
-                            speech_length_list, "cuda" if ngpu > 0 else "cpu"
-                        )
-            if task_token is None:
-                task_tokens = None
-            else:
-                task_tokens = to_device(
-                    task_token.repeat(speech_list.size(0)),
-                    "cuda" if ngpu > 0 else "cpu",
-                ).unsqueeze(1)
+                speech_length_list, "cuda" if ngpu > 0 else "cpu"
+            )
+
             lang_embds, pred_lids = model(
                 speech=speech_list,
                 speech_lengths=speech_length_list,
                 lid_labels=None,
-                task_tokens=task_tokens,
                 extract_embd=True,
             ) # [batch_size, dim], [batch_size]
+
             if extract_embd:
                 lang_embds = F.normalize(lang_embds, p=2, dim=1)
             pred_lids = [idx2lang[lid.item()] for lid in pred_lids]
 
             for uid, _lang_embd, _pred_lid, _lid_label_target in zip(utt_id_list, lang_embds, pred_lids, lid_label_list):
-                if extract_embd:
+                if extract_embd and _lid_label_target is not None:
+                    # Save lang to embeddings dictionary
                     _lang_embd_numpy = _lang_embd.detach().cpu().numpy()
                     target_lid = idx2lang[_lid_label_target.item()]
                     if distributed:
@@ -284,12 +279,17 @@ class LIDTrainer(Trainer):
                     else:
                         lang_to_embds_dic[target_lid].append(_lang_embd_numpy)
                     lang_embd_dic[uid] = _lang_embd_numpy
+                
                 lang_id_dic[uid] = _pred_lid
 
         if len(lang_id_dic) != 0:
-            # save the last results
+            # Save the last results
             if extract_embd and save_embd_per_utt:
-                np.savez(output_dir + f"/embeddings{rank + world_size * step}", **lang_embd_dic)
+                np.savez(
+                    output_dir + f"/embeddings{rank + world_size * step}", 
+                    **lang_embd_dic
+                )
+            
             with open(f"{output_dir}/lids{rank}", "a") as f:
                 # save all middle step results to the same file
                 for uid, lid in lang_id_dic.items():
