@@ -50,8 +50,6 @@ from espnet2.train.preprocessor import (
     LIDPreprocessor,
 )
 from espnet2.train.lid_trainer import LIDTrainer
-from espnet2.utils.get_default_kwargs import get_default_kwargs
-from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import int_or_none, str2bool, str_or_none
 
 model_choices = ClassChoices(
@@ -298,7 +296,9 @@ class LIDTask(AbsTask):
         [Collection[Tuple[str, Dict[str, np.ndarray]]]],
         Tuple[List[str], Dict[str, torch.Tensor]],
     ]:
-        return CommonCollateFn()
+        return CommonCollateFn(
+            not_sequence=["lid_labels"],
+        )
 
     @classmethod
     @typechecked
@@ -320,19 +320,25 @@ class LIDTask(AbsTask):
     def required_data_names(
         cls, train: bool = True, inference: bool = False
     ) -> Tuple[str, ...]:
-        retval = ("speech", "lid_labels")
+        if train:
+            # train
+            retval = ("speech", "lid_labels")
+        elif not train and not inference:
+            # validation or plot tsne
+            retval = ("speech", "lid_labels")
+        else:
+            # inference
+            retval = ("speech",)
+        
         return retval
 
-    # @classmethod
-    # def optional_data_names(
-    #     cls, train: bool = True, inference: bool = False
-    # ) -> Tuple[str, ...]:
-    #     # When calculating EER, we need trials where each trial has two
-    #     # utterances. speech2 corresponds to the second utterance of each
-    #     # trial pair in the validation/inference phase.
-    #     retval = ("speech2", "trial", "lid_labels", "task_tokens")
+    @classmethod
+    def optional_data_names(
+        cls, train: bool = True, inference: bool = False
+    ) -> Tuple[str, ...]:
+        retval = ()
 
-    #     return retval
+        return retval
 
     @classmethod
     @typechecked
