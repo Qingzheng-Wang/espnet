@@ -635,9 +635,10 @@ class Trainer:
                         )
                 del _model
 
-            with autocast(
-                scaler is not None,
-                **autocast_args,
+            with torch.amp.autocast(
+                "cuda", 
+                enabled=scaler is not None, 
+                **autocast_args
             ):
                 with reporter.measure_time("forward_time"):
                     retval = model(**batch)
@@ -853,9 +854,10 @@ class Trainer:
             if no_forward_run:
                 continue
 
-            with autocast(
-                options.use_amp,
-                **autocast_args,
+            with torch.amp.autocast(
+                "cuda", 
+                enabled=options.use_amp, 
+                **autocast_args
             ):
                 retval = model(**batch)
 
