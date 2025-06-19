@@ -70,14 +70,15 @@ ignore_init_mismatch=false      # Ignore initial mismatch
 # Inference related
 inference_model=valid.loss.best.pth  # Inference model weight file
 inference_batch_size=1
-extract_embd=false # Whether to extract embeddings or not
-save_every=1000 # Save every N steps
+extract_embd=false             # Whether to extract embeddings or not
+save_every=1000                # Save every N steps
+max_utt_per_lang_for_tsne=1000 # Maximum number of utterances per language for t-SNE visualization
 
 # [Task dependent] Set the datadir name created by local/data.sh
 train_set=        # Name of training set.
 valid_set=        # Name of validation set used for monitoring/tuning network training.
 test_sets=        # Names of test sets. Multiple items (e.g., both dev and eval sets) can be specified.
-tsne_set=        # Name of set for t-SNE visualization, typically the train set
+tsne_set=         # Name of set for t-SNE visualization, typically the train set
 
 
 # Upload model related
@@ -132,6 +133,7 @@ Options:
     inference_batch_size= # Inference batch size
     extract_embd=         # Whether to extract embeddings or not
     save_every=           # Save every N steps
+    max_utt_per_lang_for_tsne=1000 # Maximum number of utterances per language for t-SNE visualization
 
     # [Task dependent] Set the datadir name created by local/data.sh
     train_set=        # Name of training set.
@@ -273,15 +275,20 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
 
     if [ "${feats_type}" = raw ]; then
         if [ "${skip_train}" = false ]; then
-            utils/copy_data_dir.sh --validate_opts --non-print data/"${train_set}" "${data_feats}/${train_set}"
+            local/copy_data_dir.sh --validate_opts --non-print data/"${train_set}" "${data_feats}/${train_set}"
 
             # Copy extra files that are not covered by copy_data_dir.sh
             # category2utt will be used by data sampler
             cp data/"${train_set}/lang2utt" "${data_feats}/${train_set}/category2utt"
+
             for x in music noise speech; do
-                cp data/musan_${x}.scp ${data_feats}/musan_${x}.scp
+                if [ -f data/musan_${x}.scp ]; then
+                    cp data/musan_${x}.scp ${data_feats}/musan_${x}.scp
+                fi
             done
-            cp data/rirs.scp ${data_feats}/rirs.scp
+            if [ -f data/rirs.scp ]; then
+                cp data/rirs.scp ${data_feats}/rirs.scp
+            fi
 
             _opts=
             if [ -e data/"${train_set}"/segments ]; then
@@ -312,7 +319,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
         fi
 
         for dset in ${_dsets}; do
-            utils/copy_data_dir.sh --validate_opts --non-print data/"${dset}" "${data_feats}/${dset}"
+            local/copy_data_dir.sh --validate_opts --non-print data/"${dset}" "${data_feats}/${dset}"
 
             cp data/"${dset}/lang2utt" "${data_feats}/${dset}/category2utt"
 
@@ -334,22 +341,25 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
         done
     elif [ "${feats_type}" = raw_copy ]; then
         if [ "${skip_train}" = false ]; then
-            utils/copy_data_dir.sh --validate_opts --non-print data/"${train_set}" "${data_feats}/${train_set}"
+            local/copy_data_dir.sh --validate_opts --non-print data/"${train_set}" "${data_feats}/${train_set}"
 
             cp data/"${train_set}/lang2utt" "${data_feats}/${train_set}/category2utt"
 
             for x in music noise speech; do
-                cp data/musan_${x}.scp ${data_feats}/musan_${x}.scp
+                if [ -f data/musan_${x}.scp ]; then
+                    cp data/musan_${x}.scp ${data_feats}/musan_${x}.scp
+                fi
             done
-
-            cp data/rirs.scp ${data_feats}/rirs.scp
+            if [ -f data/rirs.scp ]; then
+                cp data/rirs.scp ${data_feats}/rirs.scp
+            fi
 
             echo "${feats_type}" > "${data_feats}/${train_set}/feats_type"
             echo "${audio_format}" > "${data_feats}/${train_set}/audio_format"
         fi
 
         for dset in ${_dsets}; do
-            utils/copy_data_dir.sh --validate_opts --non-print data/"${dset}" "${data_feats}/${dset}"
+            local/copy_data_dir.sh --validate_opts --non-print data/"${dset}" "${data_feats}/${dset}"
 
             cp data/"${dset}/lang2utt" "${data_feats}/${dset}/category2utt"
 
@@ -519,18 +529,17 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
                 --output_dir ${infer_exp} \
                 --dtype float32 \
                 --data_path_and_name_and_type "${_inference_dir}/wav.scp,speech,sound" \
-                --data_path_and_name_and_type "${_inference_dir}/utt2lang,lid_labels,text" \
                 --valid_batch_size ${inference_batch_size} \
                 --lid_train_config "${lid_exp}/config.yaml" \
                 --lid_model_file "${lid_exp}"/${inference_model} \
-                --use_preprocessor true \
+                --use_preprocessor false \
                 --fix_duration false \
                 --num_workers ${nj} \
                 --extract_embd ${extract_embd} \
                 --save_every ${save_every} \
                 --resume true \
                 --save_embd_per_utt true \
-                --save_embd_avg_lang true \
+                --save_embd_avg_lang false \
                 --save_tsne_plot false
     done
 fi
@@ -600,7 +609,7 @@ if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
             --save_embd_per_utt false \
             --save_embd_avg_lang true \
             --save_tsne_plot true \
-            --max_utt_per_lang_for_tsne 1000
+            --max_utt_per_lang_for_tsne ${max_utt_per_lang_for_tsne}
 fi
 
 packed_model="${lid_exp}/${lid_exp##*/}_${inference_model%.*}.zip"
