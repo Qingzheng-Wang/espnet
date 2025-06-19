@@ -114,6 +114,19 @@ def extract_embed_lid(args):
     # NOTE(jeeweon): Temporarily disable distributed to let loader include all trials
     org_distributed = distributed_option.distributed
     distributed_option.distributed = False
+
+    if len(args.valid_data_path_and_name_and_type) == 1:
+        # Only the speech is provided
+        inference = True
+    elif len(args.valid_data_path_and_name_and_type) == 2:
+        # Both speech and lid labels are provided, for plotting tsne
+        inference = False
+    else:
+        raise ValueError(
+            "The number of valid_data_path_and_name_and_type must be 1 or 2, "
+            f"but got {len(args.valid_data_path_and_name_and_type)}"
+        )
+
     iterator = LIDTask.build_streaming_iterator(
         args.valid_data_path_and_name_and_type,
         dtype=args.dtype,
@@ -123,7 +136,7 @@ def extract_embed_lid(args):
             args, train=False
         ),
         collate_fn=LIDTask.build_collate_fn(args, False),
-        inference=True,
+        inference=inference,
     )
     distributed_option.distributed = org_distributed
     custom_bs = (
@@ -324,16 +337,16 @@ def gen_tsne_plot(
     logging.info("Plotting t-SNE results...")
     plt.figure(figsize=(12, 10))
 
+    fixed_colors = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+        '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
+    ]
+
     if plot_name == "lang_to_list_embds":
         # Fixed color mapping
         unique_labels = sorted(list(set(labels)))  # 排序确保顺序固定
-        
-        fixed_colors = [
-            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
-            '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
-        ]
         
         if len(unique_labels) <= len(fixed_colors):
             color_dict = {lang: fixed_colors[i] for i, lang in enumerate(unique_labels)}
@@ -395,13 +408,14 @@ def gen_tsne_plot(
     if len(unique_labels_plotly) <= len(fixed_colors):
         color_discrete_map = {lang: fixed_colors[i] for i, lang in enumerate(unique_labels_plotly)}
     else:
-        color_discrete_map = None
+        color_map = plt.get_cmap("tab20")
+        color_discrete_map = {lang: color_map(i / len(unique_labels_plotly)) for i, lang in enumerate(unique_labels_plotly)}
 
     # Plot with Plotly Express
     fig = px.scatter(
         df, x='x', y='y', color='label',
         hover_name='label',
-        # title="t-SNE Visualization of Language Embeddings (Interactive)",
+        title="t-SNE Visualization of Language Embeddings (Interactive)",
         color_discrete_map=color_discrete_map
     )
 
