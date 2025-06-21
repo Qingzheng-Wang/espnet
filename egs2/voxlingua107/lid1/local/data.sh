@@ -33,21 +33,23 @@ if [ -z "${VOXLINGUA107}" ]; then
 fi
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
-    log "stage 1: Download"
+    log "Stage 1: Download"
     mkdir -p "${VOXLINGUA107}"
     wget -P "${VOXLINGUA107}" https://cs.taltech.ee/staff/tanel.alumae/data/voxlingua107/zip_urls.txt
     cat "${VOXLINGUA107}/zip_urls.txt" | xargs  wget --continue -P "${VOXLINGUA107}"
     find "${VOXLINGUA107}" -type f -name "*.zip" | while read -r zip_file; do
         if [[ "$(basename "${zip_file}")" == "dev.zip" ]]; then
+            log "Extracting dev.zip to ${VOXLINGUA107}/dev"
             unzip -q -o "${zip_file}" -d "${VOXLINGUA107}/dev"
         else
+            log "Extracting ${zip_file} to ${VOXLINGUA107}"
             unzip -q -o "${zip_file}" -d "${VOXLINGUA107}"
         fi
     done
 fi
 
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
-    log "stage 2: Generate wav.scp for train and dev sets"
+    log "Stage 2: Generate wav.scp for train and dev sets"
     mkdir -p data
     mkdir -p data/${train_set}
     mkdir -p data/${dev_set}
@@ -57,12 +59,12 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
 fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-    log "stage 3: Generate utt2lang for train and dev sets"
+    log "Stage 3: Generate utt2lang for train and dev sets"
     python local/prepare_voxlingua107.py --func_name gen_utt2lang
 fi
 
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
-    log "stage 4: Convert utt2lang to lang2utt and create category2utt"
+    log "Stage 4: Convert utt2lang to lang2utt and create category2utt"
     utils/utt2spk_to_spk2utt.pl data/${train_set}/utt2lang > data/${train_set}/lang2utt
     utils/utt2spk_to_spk2utt.pl data/${dev_set}/utt2lang > data/${dev_set}/lang2utt
 
@@ -72,7 +74,7 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
 fi
 
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
-    log "stage 5: Fix and validate data directories"
+    log "Stage 5: Fix and validate data directories"
     # Temporarily copy utt2lang to utt2spk and lang2utt to spk2utt
     # Because fix_data_dir.sh and validate_data_dir.sh expect these files
     cp data/${train_set}/utt2lang data/${train_set}/utt2spk
@@ -129,7 +131,6 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
     # Similar setup to Kaldi and VoxCeleb_trainer.
     find ${VOXLINGUA107}/RIRS_NOISES/simulated_rirs/mediumroom -iname "*.wav" > data/rirs.scp
     find ${VOXLINGUA107}/RIRS_NOISES/simulated_rirs/smallroom -iname "*.wav" >> data/rirs.scp
-    log "Stage 3, DONE."
 fi
 
 log "Successfully finished. [elapsed=${SECONDS}s]"
