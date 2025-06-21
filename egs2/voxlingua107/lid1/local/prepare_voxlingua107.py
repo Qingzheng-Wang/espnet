@@ -1,5 +1,4 @@
 import argparse
-import pycountry
 
 def gen_wav_scp():
     dev_wav_scp = "data/dev_voxlingua107/wav.scp"
@@ -63,6 +62,11 @@ def gen_utt2lang():
         f.writelines(sorted(dev_utt2lang_dump))
 
 def convert_voxlingua107_lang():
+    try:
+        import pycountry
+    except ImportError:
+        raise ImportError("Please install pycountry: pip install pycountry")
+
     lang2_to_language = {
         "ab": "Abkhazian",
         "af": "Afrikaans",
