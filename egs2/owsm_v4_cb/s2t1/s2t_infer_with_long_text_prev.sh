@@ -1496,7 +1496,7 @@ if [ ${stage} -le 12 ] && [ ${stop_stage} -ge 12 ] && ! [[ " ${skip_stages} " =~
     fi
     for dset in ${_dsets}; do
         _data="${data_feats}/${dset}"
-        _dir="${s2t_exp}/${inference_tag}/${dset}"
+        _dir="${s2t_exp}/${inference_tag}/${dset}_with_long_text_prev"
         _logdir="${_dir}/logdir"
         mkdir -p "${_logdir}"
 
@@ -1574,7 +1574,7 @@ if [ ${stage} -le 13 ] && [ ${stop_stage} -ge 13 ] && ! [[ " ${skip_stages} " =~
     fi
     for dset in ${_dsets}; do
         _data="${data_feats}/${dset}"
-        _dir="${s2t_exp}/${inference_tag}/${dset}"
+        _dir="${s2t_exp}/${inference_tag}/${dset}_with_long_text_prev"
 
         for _tok_type in "char" "word" "bpe"; do
             [ "${_tok_type}" = bpe ] && [ ! -f "${bpemodel}" ] && continue

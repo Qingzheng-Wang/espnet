@@ -1496,7 +1496,7 @@ if [ ${stage} -le 12 ] && [ ${stop_stage} -ge 12 ] && ! [[ " ${skip_stages} " =~
     fi
     for dset in ${_dsets}; do
         _data="${data_feats}/${dset}"
-        _dir="${s2t_exp}/${inference_tag}/${dset}"
+        _dir="${s2t_exp}/${inference_tag}/${dset}_without_text_prev"
         _logdir="${_dir}/logdir"
         mkdir -p "${_logdir}"
 
@@ -1536,7 +1536,6 @@ if [ ${stage} -le 12 ] && [ ${stop_stage} -ge 12 ] && ! [[ " ${skip_stages} " =~
                 --batch_size ${batch_size} \
                 --ngpu "${_ngpu}" \
                 --data_path_and_name_and_type "${_data}/${_scp},speech,${_type}" \
-                --data_path_and_name_and_type "${_data}/text.prev,text_prev,text" \
                 --key_file "${_logdir}"/keys.JOB.scp \
                 --s2t_train_config "${s2t_exp}"/config.yaml \
                 --s2t_model_file "${s2t_exp}"/"${inference_s2t_model}" \
@@ -1574,7 +1573,7 @@ if [ ${stage} -le 13 ] && [ ${stop_stage} -ge 13 ] && ! [[ " ${skip_stages} " =~
     fi
     for dset in ${_dsets}; do
         _data="${data_feats}/${dset}"
-        _dir="${s2t_exp}/${inference_tag}/${dset}"
+        _dir="${s2t_exp}/${inference_tag}/${dset}_without_text_prev"
 
         for _tok_type in "char" "word" "bpe"; do
             [ "${_tok_type}" = bpe ] && [ ! -f "${bpemodel}" ] && continue
