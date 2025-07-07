@@ -55,7 +55,8 @@ def get_audio_duration_batch(audio_paths: List[str], max_workers: int = 8) -> Di
 
 
 def collect_data(
-    data_dir: Union[Path, str], split: str, prefix: str, max_prev_words: int = 500
+    data_dir: Union[Path, str], split: str, prefix: str, 
+    max_prev_words: int = 500, max_workers: int = 8
 ) -> Tuple[Dict, Dict]:
     """Collect utterances from processed LibriSpeech data and organize by chapter."""
     data_dir = Path(data_dir)
@@ -111,7 +112,7 @@ def collect_data(
     # 批量获取所有音频文件的时长
     logging.info(f"Getting durations for {len(all_audio_info)} audio files using multithreading...")
     audio_paths = [info[0] for info in all_audio_info]
-    durations = get_audio_duration_batch(audio_paths, max_workers=8)
+    durations = get_audio_duration_batch(audio_paths, max_workers=max_workers)
     
     # 存储每个chapter的utterances
     chapter_2_utterances = defaultdict(list)
@@ -124,10 +125,12 @@ def collect_data(
         
         # 创建Utterance对象
         speaker_id_int = int(speaker_id)
+        speaker_id_write = f"{speaker_id_int:04d}"
         chapter_id_int = int(chapter_id)
+        chapter_id_write = f"{chapter_id_int:06d}"
         utt = Utterance(
             utt_id=utt_id,
-            wav_id=f"{speaker_id_int:04d}_{chapter_id_int:06d}",
+            wav_id=f"{speaker_id_write}_{chapter_id_write}",
             wav_path=f"sox {audio_path} -t wav -c 1 -r 16000 - |",
             start_time=0.0,  # 单个utterance从0开始
             end_time=duration,
@@ -135,7 +138,7 @@ def collect_data(
             task="<asr>",
             text=text,
             asr_text=text,
-            speaker_id=speaker_id,
+            speaker_id=speaker_id_write,
         )
         
         chapter_2_utterances[chapter_key].append(utt)
@@ -206,7 +209,7 @@ def transform_utterances_to_talks(utterances: List[Utterance]) -> List[List[Utte
     talks = []
     current_talk = []
     current_duration = 0.0
-    target_duration = 29.0  # 降低到29秒以避免超过SPEECH_MAX_LEN=30
+    target_duration = 30.0
     
     # LibriSpeech的utterances已经是按顺序排列的，我们只需要按时长组合
     for utt in utterances:
@@ -330,6 +333,7 @@ if __name__ == "__main__":
             split=split,
             prefix=args.prefix,
             max_prev_words=args.max_prev_words,
+            max_workers=args.max_workers,
         )
 
         # 处理每个chapter的数据
