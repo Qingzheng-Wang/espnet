@@ -149,6 +149,7 @@ class Utterance:
     task: str  # task token
     text: str  # target text without timestamps
     asr_text: str  # source text for CTC ASR without timestamps
+    speaker_id: str  # speaker id
 
 
 @dataclass
@@ -174,6 +175,7 @@ def merge_short_utterances(
     end_time = utts[-1].end_time
     lang = utts[0].lang
     task = utts[0].task
+    speaker_id = utts[0].speaker_id
     utt_id = (
         f"{wav_id}_{round(1000 * start_time):09d}_"
         f"{round(1000 * end_time):09d}_{lang[1:-1]}_{task[1:-1]}"
@@ -201,6 +203,7 @@ def merge_short_utterances(
         asr_text=asr_text,
         prev_text=prev_text,
         text_with_time=text_with_time,
+        speaker_id=speaker_id,
     )
 
 
@@ -222,6 +225,7 @@ def merge_short_utterances_long_prev(
     text = " ".join([u.text for u in utts])
     asr_text = " ".join([u.asr_text for u in utts])
     prev_text = SYMBOL_NA
+    speaker_id = utts[0].speaker_id
 
     return LongUtterance(
         utt_id=utt_id,
@@ -235,6 +239,7 @@ def merge_short_utterances_long_prev(
         asr_text=asr_text,
         prev_text=prev_text,
         text_with_time="",
+        speaker_id=speaker_id,
     )
 
 
