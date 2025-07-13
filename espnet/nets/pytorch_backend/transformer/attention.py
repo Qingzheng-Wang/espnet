@@ -13,6 +13,7 @@ import torch
 from torch import nn
 
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
+from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncodingRoPE
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func
@@ -190,14 +191,17 @@ class MultiHeadedAttention(nn.Module):
         if self.use_flash_attn:
             try:
                 # In the causal case, the last row will be the key mask
-                key_nonpad_mask = mask[:, -1, :]  # (#batch, time2)
+                # This is to find the unpadded portion of keys for unpad_input, 
+                # not for masking attention computation during training
+                key_nonpad_mask = mask[:, -1, :]  # (#batch, 1, time2) -> (#batch, time2)
                 if self.cross_attn:
                     # For cross attention, we do not know the query padding
+                    # Because generate step by step
                     query_nonpad_mask = torch.ones(
                         size=query.shape[:2], dtype=torch.bool, device=query.device
-                    )
+                    ) # (#batch, time1)
                 else:
-                    query_nonpad_mask = key_nonpad_mask
+                    query_nonpad_mask = key_nonpad_mask # (#batch, time2)
 
                 if key_nonpad_mask.eq(0).any():
                     # Use variable length implementation if padded
@@ -456,4 +460,225 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
             self.d_k
         )  # (batch, head, time1, time2)
 
+        return self.forward_attention(v, scores, mask)
+
+class MultiHeadedAttentionRoPE(MultiHeadedAttention):
+    """Multi-Head Attention with RoPE support.
+    
+    This extends the standard MultiHeadedAttention to apply RoPE
+    to query and key vectors before computing attention.
+    """
+
+    def __init__(
+        self,
+        n_head: int,
+        n_feat: int,
+        dropout_rate: float,
+        qk_norm: bool = False,
+        use_flash_attn: bool = False,
+        causal: bool = False,
+        cross_attn: bool = False,
+        use_sdpa: bool = False,
+        pos_enc_rope: PositionalEncodingRoPE = None,
+    ):
+        """Initialize RoPE Multi-Head Attention.
+        
+        Args:
+            n_head: Number of attention heads
+            n_feat: Feature dimension
+            dropout_rate: Dropout rate
+            qk_norm: Whether to normalize query and key
+            use_flash_attn: Whether to use flash attention
+            causal: Whether to use causal attention
+            cross_attn: Whether this is cross attention
+            use_sdpa: Whether to use SDPA
+            rope_base: Base for RoPE frequency computation
+            rope_max_len: Maximum sequence length for RoPE
+        """
+        super().__init__(
+            n_head=n_head,
+            n_feat=n_feat,
+            dropout_rate=dropout_rate,
+            qk_norm=qk_norm,
+            use_flash_attn=use_flash_attn,
+            causal=causal,
+            cross_attn=cross_attn,
+            use_sdpa=use_sdpa,
+        )
+        
+        self.cross_attn = cross_attn
+        # Initialize RoPE
+        self.rope = pos_enc_rope
+
+    def forward_qkv(self, query, key, value, **kwargs):
+        """Forward pass with RoPE applied to query and key.
+        
+        Args:
+            query: Query tensor (#batch, time1, n_feat).
+            key: Key tensor (#batch, time2, n_feat).
+            value: Value tensor (#batch, time2, n_feat).
+            **kwargs: Additional arguments
+            
+        Returns:
+            torch.Tensor: Transformed query tensor (#batch, n_head, time1, d_k).
+            torch.Tensor: Transformed key tensor (#batch, n_head, time2, d_k).
+            torch.Tensor: Transformed value tensor (#batch, n_head, time2, d_k).
+        """
+        # Get dimensions
+        batch_size = query.size(0)
+        q_len = query.size(1)
+        k_len = key.size(1)
+        
+        # Apply linear transformations
+        q = self.linear_q(query)  # [batch, q_len, n_feat]
+        k = self.linear_k(key)    # [batch, k_len, n_feat]
+        v = self.linear_v(value)  # [batch, k_len, n_feat]
+        
+        # Reshape to [batch, seq_len, n_head, head_dim]
+        q = q.view(batch_size, q_len, self.h, self.d_k)
+        k = k.view(batch_size, k_len, self.h, self.d_k)
+        v = v.view(batch_size, k_len, self.h, self.d_k)
+        
+        # Apply RoPE to query and key
+        # Reshape to [batch * n_head, seq_len, head_dim] for RoPE
+        if not self.cross_attn:
+            # self-attention, apply RoPE to query and key
+            q_rope = q.transpose(1, 2).contiguous().view(batch_size * self.h, q_len, self.d_k)
+            k_rope = k.transpose(1, 2).contiguous().view(batch_size * self.h, k_len, self.d_k)
+            
+            # Apply RoPE
+            q_rope = self.rope.apply_rope(q_rope)
+            k_rope = self.rope.apply_rope(k_rope)
+            
+            # Reshape back to [batch, n_head, seq_len, head_dim]
+            q = q_rope.view(batch_size, self.h, q_len, self.d_k)
+            k = k_rope.view(batch_size, self.h, k_len, self.d_k)
+        else:
+            # cross-attention, no RoPE for query and key
+            # 因为cross attention, key from encoder是已经加上过sinusoidal positional encoding的
+            # 另外, query在cross attention中，与key来自不同序列，
+            # RoPE主要用于编码同一序列内的相对位置关系，在cross attention中意义不大
+            q = q.transpose(1, 2) # [batch, n_head, seq_len, head_dim]
+            k = k.transpose(1, 2) # [batch, n_head, seq_len, head_dim]
+
+        v = v.transpose(1, 2)  # [batch, n_head, seq_len, head_dim]
+        
+        # Apply normalization if enabled
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+        return q, k, v
+
+    def forward(self, query, key, value, mask, expand_kv=False):
+        """Compute scaled dot product attention.
+
+        Args:
+            query (torch.Tensor): Query tensor (#batch, time1, size).
+            key (torch.Tensor): Key tensor (#batch, time2, size).
+            value (torch.Tensor): Value tensor (#batch, time2, size).
+            mask (torch.Tensor): Mask tensor (#batch, 1, time2) or
+                (#batch, time1, time2).
+            expand_kv (bool): Used only for partially autoregressive (PAR) decoding.
+                When set to `True`, `Linear` layers are computed only for the first
+                batch. This is useful to reduce the memory usage during decoding
+                when the batch size is #beam_size x #mask_count, which can be large.
+                Typically, in single waveform inference of PAR, `Linear` layers
+                should not be computed for all batches for source-attention.
+
+        Returns:
+            torch.Tensor: Output tensor (#batch, time1, d_model).
+        """
+        q, k, v = self.forward_qkv(query, key, value) # q: [batch, n_head, seq_len, head_dim]
+        
+        # Use PyTorch's Scaled Dot Product Attention implementation
+        if getattr(self, "use_sdpa", False):
+            # The shape of mask must be broadcastable to the shape of attention weights
+            out = torch.nn.functional.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                mask.unsqueeze(1) if mask is not None else None,
+                dropout_p=self.dropout_rate if self.training else 0.0,
+            )  # (batch, head, time1, d_k)
+
+            out = out.transpose(1, 2)  # (batch, time1, head, d_k)
+            out = out.reshape(out.shape[0], out.shape[1], -1)  # (batch, time1, d_model)
+            return self.linear_out(out)  # (batch, time1, d_model)
+
+        # Use Flash Attention implementation
+        if self.use_flash_attn:
+            try:
+                query = q.transpose(1, 2).flatten(2) # [batch, time1, d_model]
+                key = k.transpose(1, 2).flatten(2) # [batch, time2, d_model]
+                value = v.transpose(1, 2).flatten(2) # [batch, time2, d_model]
+
+                # In the causal case, the last row will be the key mask
+                key_nonpad_mask = mask[:, -1, :]  # (#batch, 1, time2) -> (#batch, time2)
+                if self.cross_attn:
+                    # For cross attention, we do not know the query padding
+                    # because query encoder result, not query self, query encoder result is another task
+                    query_nonpad_mask = torch.ones(
+                        size=query.shape[:2], dtype=torch.bool, device=query.device
+                    ) # (#batch, time1)
+                else:
+                    query_nonpad_mask = key_nonpad_mask
+
+                if key_nonpad_mask.eq(0).any():
+                    # Use variable length implementation if padded
+                    q, indices_q, cu_seqlens_q, max_seqlen_q = unpad_input(
+                        query, query_nonpad_mask
+                    )[:4]
+                    k, indices_k, cu_seqlens_k, max_seqlen_k = unpad_input(
+                        key, key_nonpad_mask
+                    )[:4]
+                    v, _, _, _ = unpad_input(value, key_nonpad_mask)[:4]
+
+                    q = q.reshape(-1, self.h, self.d_k)
+                    k = k.reshape(-1, self.h, self.d_k)
+                    v = v.reshape(-1, self.h, self.d_k)
+
+                    out = flash_attn_varlen_func(
+                        q,
+                        k,
+                        v,
+                        cu_seqlens_q,
+                        cu_seqlens_k,
+                        max_seqlen_q,
+                        max_seqlen_k,
+                        dropout_p=self.dropout_rate if self.training else 0.0,
+                        causal=self.causal,
+                    )  # (total, nheads, headdim)
+
+                    out = out.reshape(out.shape[0], -1)
+                    out = self.linear_out(out)
+
+                    out = pad_input(out, indices_q, query.shape[0], query.shape[1])
+                    return out
+
+                else:
+                    # Use fixed length implementation if not padded,
+                    # which is faster than the variable length implementation
+                    del key_nonpad_mask
+
+                    out = flash_attn_func(
+                        q.transpose(1, 2),
+                        k.transpose(1, 2),
+                        v.transpose(1, 2),
+                        dropout_p=self.dropout_rate if self.training else 0.0,
+                        causal=self.causal,
+                    )  # (batch_size, seqlen, nheads, headdim)
+                    del q, k, v
+
+                    out = out.reshape(out.shape[0], out.shape[1], -1)
+                    out = self.linear_out(out)
+                    return out
+
+            except Exception as e:
+                logging.warning(
+                    f"Flash Attention failed, falling back to default attention: {e}"
+                )
+                self.use_flash_attn = False
+
+        # Fall back to the default implementation
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
         return self.forward_attention(v, scores, mask)

@@ -66,20 +66,20 @@ class PositionalEncoding(torch.nn.Module):
                 if self.pe.dtype != x.dtype or self.pe.device != x.device:
                     self.pe = self.pe.to(dtype=x.dtype, device=x.device)
                 return
-        pe = torch.zeros(x.size(1), self.d_model)
+        pe = torch.zeros(x.size(1), self.d_model) # [time, d_model]
         if self.reverse:
             position = torch.arange(
                 x.size(1) - 1, -1, -1.0, dtype=torch.float32
             ).unsqueeze(1)
         else:
-            position = torch.arange(0, x.size(1), dtype=torch.float32).unsqueeze(1)
+            position = torch.arange(0, x.size(1), dtype=torch.float32).unsqueeze(1) # [time, 1]
         div_term = torch.exp(
             torch.arange(0, self.d_model, 2, dtype=torch.float32)
             * -(math.log(10000.0) / self.d_model)
-        )
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
+        ) # [d_model/2]
+        pe[:, 0::2] = torch.sin(position * div_term) # [time, d_model/2]
+        pe[:, 1::2] = torch.cos(position * div_term) # [time, d_model/2]
+        pe = pe.unsqueeze(0) # [1, time, d_model]
         self.pe = pe.to(device=x.device, dtype=x.dtype)
 
     def forward(self, x: torch.Tensor):
@@ -506,3 +506,90 @@ class ConvolutionalPositionalEmbedding(torch.nn.Module):
         if self.use_residual:
             x = x + residual
         return x
+
+
+class PositionalEncodingRoPE(torch.nn.Module):
+    """Rotary Position Embedding (RoPE) implementation.
+    
+    RoPE applies rotary transformations to query and key vectors based on their positions,
+    enabling the model to understand relative positions better.
+    
+    Args:
+        d_model (int): Embedding dimension.
+        dropout_rate (float): Dropout rate.
+        n_head (int): Number of attention heads.
+        max_len (int): Maximum input length.
+        base (float): Base for computing rotation frequencies.
+    """
+
+    def __init__(
+        self, 
+        d_model: int,
+        dropout_rate: float,
+        n_head: int, 
+        max_len: int = 5000,
+        base: float = 10000.0,
+    ):
+        """Initialize RoPE positional encoding."""
+        super().__init__()
+        self.d_model = d_model
+        self.n_head = n_head
+        self.base = base
+        self.max_len = max_len
+
+        self.dropout = torch.nn.Dropout(p=dropout_rate)
+        self.xscale = math.sqrt(self.d_model)
+        
+        # Pre-compute rotation frequencies
+        self._precompute_freqs_cis()
+
+    def _precompute_freqs_cis(self):
+        """Initialize rotation frequencies for RoPE."""
+
+        # Create frequency tensor for rotary embeddings
+        dim = self.d_model // self.n_head
+        # [0, 2, 4, ..., dim-2], dim // 2 indices in total
+        # freq = 1.0 / (base^(2i/d_model)) for i in range(d_model//2)
+        # Note: 1.0 / (base^(2i/d_model)) == base^(-2i/d_model)
+        freq = (1.0 / (self.base ** (torch.arange(0, dim, 2, dtype=torch.float32)[: (dim // 2)] / dim)))
+        t = torch.arange(self.max_len, device=freq.device)
+        freqs = torch.outer(t, freq).float()
+        freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
+        self.register_buffer('freqs_cis', freqs_cis, persistent=False)
+
+    def apply_rope(self, x: torch.Tensor, pos_offset: int = 0) -> torch.Tensor:
+        """Apply RoPE to input tensor.
+        
+        Args:
+            x: Input tensor [batch * n_head, seq_len, d_model // n_head]
+            pos_offset: Position offset for incremental generation
+            
+        Returns:
+            Rotated tensor [batch * n_head, seq_len, d_model // n_head]
+        """
+
+        batch_size, seq_len, d_model = x.shape
+        x_ = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2)) # [batch, seq_len, d_model//2]
+        freqs_cis = self.freqs_cis[pos_offset:pos_offset + x.size(1)].unsqueeze(0) # [1, seq_len, d_model//2]
+        x_out = torch.view_as_real(x_ * freqs_cis).reshape(batch_size, seq_len, d_model)
+        return x_out.type_as(x)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass - for compatibility with PositionalEncoding interface.
+        
+        Note: RoPE is typically applied within attention mechanism,
+        but we provide this for interface compatibility.
+        
+        Args:
+            x: Input tensor [batch, seq_len, d_model]
+            
+        Returns:
+            Output tensor [batch, seq_len, d_model]
+        """
+        # Multiply by sqrt(d_model) to maintain consistency with other embeddings,
+        # then apply dropout. This follows the original Transformer paper's approach
+        # and helps maintain numerical stability.
+        # No positional encoding is added here since positions are directly applied 
+        # to query and key later in the MultiHeadedAttentionRoPE.
+        return self.dropout(x * self.xscale)

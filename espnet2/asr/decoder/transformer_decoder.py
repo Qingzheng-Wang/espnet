@@ -10,11 +10,11 @@ from typeguard import typechecked
 
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
-from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
+from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention, MultiHeadedAttentionRoPE
 from espnet.nets.pytorch_backend.transformer.decoder_layer import DecoderLayer
 from espnet.nets.pytorch_backend.transformer.dynamic_conv import DynamicConvolution
 from espnet.nets.pytorch_backend.transformer.dynamic_conv2d import DynamicConvolution2D
-from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
+from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding, PositionalEncodingRoPE
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
 from espnet.nets.pytorch_backend.transformer.lightconv import LightweightConvolution
 from espnet.nets.pytorch_backend.transformer.lightconv2d import LightweightConvolution2D
@@ -142,7 +142,7 @@ class BaseTransformerDecoder(
         memory = hs_pad
         memory_mask = (~make_pad_mask(hlens, maxlen=memory.size(1)))[:, None, :].to(
             memory.device
-        )
+        ) # (B, 1, L)
         # Padding for Longformer
         if memory_mask.shape[-1] != memory.shape[1]:
             padlen = memory.shape[1] - memory_mask.shape[-1]
@@ -211,6 +211,7 @@ class BaseTransformerDecoder(
             x, tgt_mask, memory, memory_mask = decoder(
                 x, tgt_mask, memory, memory_mask, cache=c
             )
+            # 注意，最后return的是new_cache, new_cache上cat最新的值
             new_cache.append(x)
 
         if self.normalize_before:
@@ -228,7 +229,7 @@ class BaseTransformerDecoder(
 
     def score(self, ys, state, x, return_hs=False):
         """Score."""
-        ys_mask = subsequent_mask(len(ys), device=x.device).unsqueeze(0)
+        ys_mask = subsequent_mask(len(ys), device=x.device).unsqueeze(0) # (1, L, L)
         if return_hs:
             (logp, hs), state = self.forward_one_step(
                 ys.unsqueeze(0),
@@ -436,8 +437,8 @@ class TransformerDecoder(BaseTransformerDecoder):
                     self_attention_dropout_rate,
                     qk_norm,
                     use_flash_attn,
-                    True,
-                    False,
+                    True, # causal
+                    False, # cross_attn
                 ),
                 MultiHeadedAttention(
                     attention_heads,
@@ -445,8 +446,8 @@ class TransformerDecoder(BaseTransformerDecoder):
                     src_attention_dropout_rate,
                     qk_norm,
                     use_flash_attn,
-                    False,
-                    True,
+                    False, # causal
+                    True, # cross_attn
                 ),
                 PositionwiseFeedForward(attention_dim, linear_units, dropout_rate),
                 dropout_rate,
@@ -955,3 +956,135 @@ class TransformerMDDecoder(BaseTransformerDecoder):
         # transpose state of [layer, batch] into [batch, layer]
         state_list = [[states[i][b] for i in range(n_layers)] for b in range(n_batch)]
         return logp, state_list
+
+class TransformerDecoderRoPE(BaseTransformerDecoder):
+    """Transformer decoder with RoPE (Rotary Position Embedding).
+    
+    This decoder uses RoPE instead of absolute positional encoding,
+    while maintaining the same API as the standard TransformerDecoder.
+    """
+
+    @typechecked
+    def __init__(
+        self,
+        vocab_size: int,
+        encoder_output_size: int,
+        attention_heads: int = 4,
+        linear_units: int = 2048,
+        num_blocks: int = 6,
+        dropout_rate: float = 0.1,
+        positional_dropout_rate: float = 0.1,
+        self_attention_dropout_rate: float = 0.0,
+        src_attention_dropout_rate: float = 0.0,
+        input_layer: str = "embed",
+        use_output_layer: bool = True,
+        pos_enc_class = None,  # For compatibility, but RoPE will be used
+        normalize_before: bool = True,
+        concat_after: bool = False,
+        layer_drop_rate: float = 0.0,
+        qk_norm: bool = False,
+        use_flash_attn: bool = True,
+        gradient_checkpoint_layers: List[int] = [],
+        rope_base: float = 10000.0,
+        rope_max_len: int = 5000,
+    ):
+        """Initialize RoPE Transformer Decoder.
+        
+        Args:
+            vocab_size: Vocabulary size
+            encoder_output_size: Encoder output dimension
+            attention_heads: Number of attention heads
+            linear_units: Number of linear units in FFN
+            num_blocks: Number of decoder blocks
+            dropout_rate: Dropout rate
+            positional_dropout_rate: Positional dropout rate
+            self_attention_dropout_rate: Self-attention dropout rate
+            src_attention_dropout_rate: Source attention dropout rate
+            input_layer: Input layer type ("embed" or "linear")
+            use_output_layer: Whether to use output layer
+            pos_enc_class: Position encoding class (for compatibility)
+            normalize_before: Whether to normalize before sublayers
+            concat_after: Whether to concatenate after attention
+            layer_drop_rate: Layer drop rate
+            qk_norm: Whether to normalize query and key
+            use_flash_attn: Whether to use flash attention
+            gradient_checkpoint_layers: Layers to use gradient checkpointing
+            rope_base: Base for RoPE frequency computation
+            rope_max_len: Maximum sequence length for RoPE
+        """
+        # Use RoPE as positional encoding
+        assert pos_enc_class is None, "RoPE is used as positional encoding"
+        def pos_enc_rope_class(d_model, dropout_rate):
+            return PositionalEncodingRoPE(
+                d_model=d_model, 
+                dropout_rate=dropout_rate,
+                n_head=attention_heads,
+                base=rope_base,
+                max_len=rope_max_len,
+            )
+        
+        super().__init__(
+            vocab_size=vocab_size,
+            encoder_output_size=encoder_output_size,
+            dropout_rate=dropout_rate,
+            positional_dropout_rate=positional_dropout_rate,
+            input_layer=input_layer,
+            use_output_layer=use_output_layer,
+            pos_enc_class=pos_enc_rope_class,
+            normalize_before=normalize_before,
+            gradient_checkpoint_layers=gradient_checkpoint_layers,
+        )
+
+        self.pos_enc_rope = pos_enc_rope_class(
+            d_model=encoder_output_size,
+            dropout_rate=positional_dropout_rate,
+        )
+
+        # Check flash attention availability
+        if use_flash_attn:
+            try:
+                from espnet2.torch_utils.get_flash_attn_compatability import (
+                    is_flash_attn_supported,
+                )
+                use_flash_attn = is_flash_attn_supported()
+                import flash_attn  # noqa
+            except Exception:
+                use_flash_attn = False
+
+        attention_dim = encoder_output_size
+        
+        # Create decoder layers with RoPE attention
+        self.decoders = repeat(
+            num_blocks,
+            lambda lnum: DecoderLayer(
+                attention_dim,
+                MultiHeadedAttentionRoPE(
+                    n_head=attention_heads,
+                    n_feat=attention_dim,
+                    dropout_rate=self_attention_dropout_rate,
+                    qk_norm=qk_norm,
+                    use_flash_attn=use_flash_attn,
+                    causal=True,
+                    cross_attn=False,
+                    use_sdpa=False,
+                    pos_enc_rope=self.pos_enc_rope,
+                ),
+                MultiHeadedAttentionRoPE(
+                    attention_heads,
+                    attention_dim,
+                    src_attention_dropout_rate,
+                    qk_norm=qk_norm,
+                    use_flash_attn=use_flash_attn,
+                    causal=False,
+                    cross_attn=True,
+                    use_sdpa=False,
+                    pos_enc_rope=self.pos_enc_rope,
+                ),
+                # Feed-forward network
+                PositionwiseFeedForward(attention_dim, linear_units, dropout_rate),
+                dropout_rate,
+                normalize_before,
+                concat_after,
+            ),
+            layer_drop_rate,
+        )

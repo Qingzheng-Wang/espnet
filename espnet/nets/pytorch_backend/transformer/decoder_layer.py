@@ -103,6 +103,8 @@ class DecoderLayer(nn.Module):
         if self.normalize_before:
             tgt = self.norm1(tgt)
 
+        # 外面transformer decoder调用forward_one_step的时候才会用到cache
+        # 这里的cache不是kv cache，只是存储了decoder的hidden states
         if cache is None:
             tgt_q = tgt
             tgt_q_mask = tgt_mask
@@ -172,6 +174,7 @@ class DecoderLayer(nn.Module):
             x = self.norm3(x)
 
         if cache is not None:
+            # 最终输出的是拼接上之前所有cached的hidden states
             x = torch.cat([cache, x], dim=1)
 
         if pre_memory is not None:

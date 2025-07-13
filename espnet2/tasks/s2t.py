@@ -20,6 +20,7 @@ from espnet2.asr.decoder.transformer_decoder import (
     LightweightConvolution2DTransformerDecoder,
     LightweightConvolutionTransformerDecoder,
     TransformerDecoder,
+    TransformerDecoderRoPE,
 )
 from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -170,6 +171,7 @@ decoder_choices = ClassChoices(
         whisper=OpenAIWhisperDecoder,
         hugging_face_transformers=HuggingFaceTransformersDecoder,
         s4=S4Decoder,
+        transformer_rope=TransformerDecoderRoPE,
     ),
     type_check=AbsDecoder,
     default=None,
