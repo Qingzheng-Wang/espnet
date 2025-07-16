@@ -1541,7 +1541,7 @@ class AbsTask(ABC):
                         project = args.wandb_project
 
                     # Wandb server generates a random name, if args.wandb_name is None
-                    name = args.wandb_name
+                    name = os.path.basename(args.config).replace(".yaml", "")
 
                     wandb.init(
                         entity=args.wandb_entity,
@@ -1551,7 +1551,7 @@ class AbsTask(ABC):
                         id=args.wandb_id,
                         resume=args.resume,
                     )
-                    wandb.config.update(args)
+                    wandb.config.update(args, allow_val_change=True)
                 else:
                     # wandb also supports grouping for distributed training,
                     # but we only log aggregated data,

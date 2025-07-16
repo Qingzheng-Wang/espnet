@@ -2622,7 +2622,6 @@ class S2TPreprocessor(CommonPreprocessor):
                         and np.random.uniform() > self.text_prev_apply_prob
                     ):
                         text = self.na_symbol
-
                     text = self.text_cleaner(text)
                     tokens = self.tokenizer.text2tokens(text)
                     text_ints = self.token_id_converter.tokens2ids(tokens)

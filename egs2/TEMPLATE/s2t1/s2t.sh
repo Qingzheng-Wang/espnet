@@ -428,9 +428,10 @@ if [ -z "${s2t_tag}" ]; then
         s2t_tag+="_"${hugging_face_model_name_or_path/\//-}
     fi
     # Add overwritten arg's info
-    if [ -n "${s2t_args}" ]; then
-        s2t_tag+="$(echo "${s2t_args}" | sed -e "s/--/\_/g" -e "s/[ |=/]//g")"
-    fi
+    # Comment, because it will make the tag too long
+    # if [ -n "${s2t_args}" ]; then
+    #     s2t_tag+="$(echo "${s2t_args}" | sed -e "s/--/\_/g" -e "s/[ |=/]//g")"
+    # fi
     if [ -n "${speed_perturb_factors}" ]; then
         s2t_tag+="_sp"
     fi
