@@ -15,7 +15,7 @@ tsne_set="dev_voxlingua107"
 
 # Train
 feats_type="raw"
-config_dir="conf/mms_ecapa_bs3min_baseline.yaml"
+config_dir="conf/mms_ecapa_baseline.yaml"
 exp_dir="exp_voxlingua107_raw"
 
 # Inference
@@ -32,7 +32,7 @@ max_utt_per_lang_for_tsne=100
     --tsne_set "${tsne_set}" \
     --inference_model ${inference_model} \
     --inference_batch_size ${inference_batch_size} \
-    --extract_embd false \
+    --extract_embd true \
     --save_every 1000 \
     --nj 8 \
     --ngpu 1 \

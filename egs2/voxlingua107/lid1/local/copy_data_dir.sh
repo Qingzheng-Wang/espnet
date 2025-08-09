@@ -76,7 +76,7 @@ fi
 cat $srcdir/utt2lang | utils/apply_map.pl -f 1 $destdir/utt_map  | \
   utils/apply_map.pl -f 2 $destdir/lang_map >$destdir/utt2lang
 
-utils/utt2spk_to_spk2utt.pl <$destdir/utt2lang >$destdir/lang2utt
+utils/utt2lang_to_lang2utt.pl <$destdir/utt2lang >$destdir/lang2utt
 
 if [ -f $srcdir/feats.scp ]; then
   utils/apply_map.pl -f 1 $destdir/utt_map <$srcdir/feats.scp >$destdir/feats.scp
@@ -115,12 +115,6 @@ if [ -f $srcdir/reco2dur ]; then
     utils/apply_map.pl -f 1 $destdir/utt_map <$srcdir/reco2dur >$destdir/reco2dur
   fi
 fi
-if [ -f $srcdir/spk2gender ]; then
-  utils/apply_map.pl -f 1 $destdir/spk_map <$srcdir/spk2gender >$destdir/spk2gender
-fi
-if [ -f $srcdir/cmvn.scp ]; then
-  utils/apply_map.pl -f 1 $destdir/spk_map <$srcdir/cmvn.scp >$destdir/cmvn.scp
-fi
 for f in frame_shift stm glm ctm; do
   if [ -f $srcdir/$f ]; then
     cp $srcdir/$f $destdir
@@ -143,3 +137,5 @@ done
 
 [ ! -f $srcdir/feats.scp ] && validate_opts="$validate_opts --no-feats"
 [ ! -f $srcdir/text ] && validate_opts="$validate_opts --no-text"
+
+utils/validate_data_dir.sh $validate_opts $destdir
