@@ -70,7 +70,7 @@ ignore_init_mismatch=false      # Ignore initial mismatch
 # Inference related
 inference_model=valid.loss.best.pth  # Inference model weight file
 inference_batch_size=1
-extract_embd=false             # Whether to extract embeddings or not
+extract_embd=false             # Whether to extract embeddings per utt
 save_every=1000                # Save every N steps
 max_utt_per_lang_for_tsne=1000 # Maximum number of utterances per language for t-SNE visualization
 
@@ -514,18 +514,18 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
             # SGE can't include "/" in a job name
             jobname="$(basename ${infer_exp})"
         else
-            jobname="${infer_exp}/lid_inference.log"
+            jobname="${infer_exp}/inference_embd_lid.log"
         fi
 
-        log "Extracting language embeddings and ids... log: '${infer_exp}/lid_inference_test.log'"
+        log "Extracting language embeddings and ids... log: '${infer_exp}/inference_embd_lid.log'"
         ${python} -m espnet2.bin.launch \
             --cmd "${cuda_cmd} --name ${jobname}" \
-            --log ${infer_exp}/lid_inference_test.log \
+            --log ${infer_exp}/inference_embd_lid.log \
             --ngpu ${ngpu} \
             --num_nodes ${num_nodes} \
             --init_file_prefix ${lid_exp}/.dist_init_ \
             --multiprocessing_distributed true -- \
-            ${python} -m espnet2.bin.lid_inference_dist \
+            ${python} -m espnet2.bin.lid_inference \
                 --output_dir ${infer_exp} \
                 --dtype float32 \
                 --data_path_and_name_and_type "${_inference_dir}/wav.scp,speech,sound" \
@@ -546,7 +546,7 @@ fi
 
 if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
     log "Stage 7: Score on the test set."
-    
+
     inference_model_name="${inference_model%.pth}"
     for test_set in ${test_sets_all}; do
         infer_exp="${lid_exp}/inference/${inference_model_name}/${test_set}"
@@ -567,7 +567,7 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
 fi
 
 if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
-    log "Stage 8: Plot t-SNE and save language embeddings on train sets."
+    log "Stage 8: Plot t-SNE."
 
     if [ -z "${tsne_set}" ]; then
         tsne_set="${train_set}"
@@ -581,18 +581,18 @@ if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
         # SGE can't include "/" in a job name
         jobname="$(basename ${infer_exp})"
     else
-        jobname="${infer_exp}/lid_inference.log"
+        jobname="${infer_exp}/inference_tsne.log"
     fi
 
-    log "Extracting language embeddings and ids... log: '${infer_exp}/lid_inference_test.log'"
+    log "Plotting t-SNE... log: '${infer_exp}/inference_tsne.log'"
     ${python} -m espnet2.bin.launch \
         --cmd "${cuda_cmd} --name ${jobname}" \
-        --log ${infer_exp}/lid_inference_test.log \
+        --log ${infer_exp}/inference_tsne.log \
         --ngpu ${ngpu} \
         --num_nodes ${num_nodes} \
         --init_file_prefix ${lid_exp}/.dist_init_ \
         --multiprocessing_distributed true -- \
-        ${python} -m espnet2.bin.lid_inference_dist \
+        ${python} -m espnet2.bin.lid_inference \
             --output_dir ${infer_exp} \
             --dtype float32 \
             --data_path_and_name_and_type "${_inference_dir}/wav.scp,speech,sound" \

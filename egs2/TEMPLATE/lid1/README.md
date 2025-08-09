@@ -1,119 +1,97 @@
 # Language Identification
 
-This is a template of Spk1 recipe for ESPnet2.
-It follows d-vector style training/inference for speaker verification.
-In other words, it trains a DNN as a closed set speaker classifier.
-After training the classification head is removed. The last hidden layer
-(or sometimes another layer) is used as a speaker representation (i.e.,
-speaker embedding) to represent diverse open set speakers.
+This is a template of the `lid1` recipe for ESPnet2.
+It follows a classification-based training/inference pipeline for spoken language identification.
+The model is trained as a closed-set classifier over a predefined set of language labels.
+Optionally, language embeddings can be extracted and used for downstream analysis, e.g., t-SNE visualization.
 
 ## Table of Contents
 
-* [Recipe flow](#recipe-flow)
-  * [1\. Data preparation](#1-data-preparation)
-  * [2\. Speed perturbation](#2-speed-perturbation)
-  * [3\. Wav format](#3-wav-format)
-  * [4\. Spk statistics collection](#4-spk-statistics-collection)
-  * [5\. Spk training](#5-spk-training)
-  * [6\. Speaker embedding extraction](#6-speaker-embedding-extraction)
-  * [7\. Score calculation](#7-score-calculation)
-  * [8\. Metric calculation](#8-metric-calculation)
-  * [9\-10\. (Optional) Pack results for upload](#9-10-optional-pack-results-for-upload)
-* [How to run](#how-to-run)
-  * [LibriSpeech training](#librispeech-training)
-* [Related works](#related-works)
+- [Language Identification](#language-identification)
+  - [Table of Contents](#table-of-contents)
+  - [Recipe flow](#recipe-flow)
+    - [1. Data preparation](#1-data-preparation)
+    - [2. Speed perturbation (Optional)](#2-speed-perturbation-optional)
+    - [3. Wav format](#3-wav-format)
+    - [4. Statistics collection](#4-statistics-collection)
+    - [5. LID training](#5-lid-training)
+    - [6. Inference and embedding extraction](#6-inference-and-embedding-extraction)
+    - [7. Score calculation](#7-score-calculation)
+    - [8. t-SNE visualization](#8-t-sne-visualization)
+    - [9-10. (Optional) Pack and upload results](#9-10-optional-pack-and-upload-results)
+  - [How to run](#how-to-run)
+    - [Example: VoxLingua107 training](#example-voxlingua107-training)
 
 ## Recipe flow
 
-Spk1 recipe consists of 4 stages.
+`lid1` recipe consists of 10 stages.
 
 ### 1. Data preparation
 
-Data preparation stage.
+Prepares Kaldi-style data directories using `local/data.sh`.
 
-#### ESPnet format:
+Expected files include:
+- `wav.scp`: path to raw audio
+- `utt2lang`: utterance-to-language mapping
+- `lang2utt`: language-to-utterance mapping (for sampling)
+- `segments` (optional): used to extract segments from long recordings
 
-It calls `local/data.sh` to create Kaldi-style data directories in `data/` for training, validation, and evaluation sets. It's the same as `asr1` tasks.
+### 2. Speed perturbation (Optional)
 
-See also:
-- [About Kaldi-style data directory](https://github.com/espnet/espnet/tree/master/egs2/TEMPLATE#about-kaldi-style-data-directory)
-
-### 2. Speed perturbation
-Generate train data with different speed offline, as a form of augmentation.
+Applies offline speed perturbation to the training set using multiple speed factors, e.g., `0.9 1.0 1.1`.
 
 ### 3. Wav format
 
-Format the wave files in `wav.scp` to a single format (wav / flac / kaldi_ark).
+Formats the audio to a consistent format (`wav`, `flac`, or Kaldi-ark) and copies necessary metadata to the working directory.
+Required for both training and evaluation sets.
 
-### 4. Spk statistics collection
+### 4. Statistics collection
 
-Statistics calculation stage.
-It collects the shape information of input and output texts for Spk training.
-Currently, it's close to a dummy because we set all utterances to have equal
-duration in the training phase.
+Collects input feature shape statistics and language information needed for batching and model configuration.
 
-### 5. Spk training
+### 5. LID training
 
-Spk model training stage.
-You can change the training setting via `--spk_config` and `--spk_args` options.
+Trains the language identification model using the configuration provided via `--lid_config` and optional arguments in `--lid_args`.
+The model is trained to predict the correct language ID for each utterance.
 
-See also:
-- [Change the configuration for training](https://espnet.github.io/espnet/espnet2_training_option.html)
-- [Distributed training](https://espnet.github.io/espnet/espnet2_distributed.html)
+### 6. Inference and embedding extraction
 
-### 6. Speaker embedding extraction
-Extracts speaker embeddings for inference.
-Speaker embeddings belonging to the evaluation set are extracted.
-If `score_norm=true` and/or `qmf_func=true`, cohort set(s) for score normalization and/or quality measure function is also extracted.
+Performs inference on evaluation sets. This stage supports both:
+- LID prediction (predicted `utt2lang`)
+- Language embedding extraction (utterance-level or averaged per language)
+- Optionally saves intermediate outputs
 
 ### 7. Score calculation
-Calculates speaker similarity scores for an evaluation protocol (i.e., a set of trials).
-One scalar score is calcuated for each trial.
 
-This stage includes score normalization if set with `--score_norm=true`.
-This stage includes score normalization if set with `--qmf_func=true`.
+Computes standard classification metrics (Accuracy, Macro Accuracy) by comparing model predictions with reference `utt2lang`.
 
-### 8. Metric calculation
-Calculates equal error rates (EERs) and minimum detection cost function (minDCF).
+### 8. t-SNE visualization
 
-### 9-10. (Optional) Pack results for upload
+Visualizes the per-language embeddings using t-SNE.
 
-Packing stage.
-It packs the trained model files and uploads to Huggingface.
-If you want to run this stage, you need to register your account in Huggingface.
+### 9-10. (Optional) Pack and upload results
+
+Packs the trained model and metadata into a zip file and optionally uploads it to Hugging Face Hub for sharing and reproducibility.
 
 ## How to run
 
-### VoxCeleb Training
-Here, we show the procedure to run the recipe using `egs2/voxceleb/spk1`.
+### Example: VoxLingua107 training
 
-Move to the recipe directory.
+Move to the recipe directory:
 ```sh
-$ cd egs2/voxceleb/spk1
+cd egs2/voxlingua107/lid1
 ```
 
-Modify `VOXCELEB1`, `VOXCELEB2` variables in `db.sh` if you want to change the download directory.
+Edit the following files:
 ```sh
-$ vim db.sh
+vim db.sh        # set path to VoxLingua107 dataset
+vim cmd.sh       # job scheduling command if using a cluster
+vim conf/mms_ecapa_bs3min_baseline.yaml  # model and training configuration (default training configuration)
 ```
 
-Modify `cmd.sh` and `conf/*.conf` if you want to use the job scheduler.
-See the detail in [using job scheduling system](https://espnet.github.io/espnet/parallelization.html).
+Then run the full pipeline:
 ```sh
-$ vim cmd.sh
+./run.sh
 ```
 
-Run `run.sh`, which conducts all of the stages explained above.
-```sh
-$ ./run.sh
-```
-
-## Related works
-```
-@INPROCEEDINGS{jung2022pushing,
-  title={Pushing the limits of raw waveform speaker recognition},
-  author={Jung, Jee-weon and Kim, You Jin and Heo, Hee-Soo and Lee, Bong-Jin and Kwon, Youngki and Chung, Joon Son},
-  year={2022},
-  booktitle={Proc. INTERSPEECH}
-}
-```
+This will go through all the stages from data preparation to scoring.
