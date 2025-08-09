@@ -3,11 +3,8 @@ from typing import Callable, Collection, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 from typeguard import typechecked
 
-from espnet2.train.abs_espnet_model import AbsESPnetModel
-from espnet2.lid.espnet_model import ESPnetLIDModel
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.asteroid_frontend import AsteroidFrontend
@@ -21,27 +18,30 @@ from espnet2.asr.specaug.specaug import SpecAug
 from espnet2.layers.abs_normalize import AbsNormalize
 from espnet2.layers.global_mvn import GlobalMVN
 from espnet2.layers.utterance_mvn import UtteranceMVN
+from espnet2.lid.espnet_model import ESPnetLIDModel
 from espnet2.spk.encoder.conformer_encoder import MfaConformerEncoder
 from espnet2.spk.encoder.ecapa_tdnn_encoder import EcapaTdnnEncoder
 from espnet2.spk.encoder.identity_encoder import IdentityEncoder
 from espnet2.spk.encoder.rawnet3_encoder import RawNet3Encoder
 from espnet2.spk.encoder.ska_tdnn_encoder import SkaTdnnEncoder
 from espnet2.spk.encoder.xvector_encoder import XvectorEncoder
-from espnet2.lid.loss.aamsoftmax import AAMSoftmax
-from espnet2.lid.loss.aamsoftmax_subcenter_intertopk import (
+from espnet2.spk.loss.aamsoftmax import AAMSoftmax
+from espnet2.spk.loss.aamsoftmax_subcenter_intertopk import (
     ArcMarginProduct_intertopk_subcenter,
 )
-from espnet2.lid.loss.softmax import Softmax
-from espnet2.lid.pooling.abs_pooling import AbsPooling
-from espnet2.lid.pooling.chn_attn_stat_pooling import ChnAttnStatPooling
-from espnet2.lid.pooling.mean_pooling import MeanPooling
-from espnet2.lid.pooling.stat_pooling import StatsPooling
+from espnet2.spk.loss.abs_loss import AbsLoss
+from espnet2.spk.loss.softmax import Softmax
+from espnet2.spk.pooling.abs_pooling import AbsPooling
+from espnet2.spk.pooling.chn_attn_stat_pooling import ChnAttnStatPooling
+from espnet2.spk.pooling.mean_pooling import MeanPooling
+from espnet2.spk.pooling.stat_pooling import StatsPooling
 from espnet2.spk.projector.abs_projector import AbsProjector
 from espnet2.spk.projector.rawnet3_projector import RawNet3Projector
 from espnet2.spk.projector.ska_tdnn_projector import SkaTdnnProjector
 from espnet2.spk.projector.xvector_projector import XvectorProjector
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.torch_utils.initialize import initialize
+from espnet2.train.abs_espnet_model import AbsESPnetModel
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import (
@@ -49,7 +49,6 @@ from espnet2.train.preprocessor import (
     CommonPreprocessor,
     LIDPreprocessor,
 )
-from espnet2.train.lid_trainer import LIDTrainer
 from espnet2.utils.types import int_or_none, str2bool, str_or_none
 
 model_choices = ClassChoices(
@@ -185,6 +184,7 @@ loss_choices = ClassChoices(
         aamsoftmax_sc_topk=ArcMarginProduct_intertopk_subcenter,
         softmax=Softmax,
     ),
+    type_check=AbsLoss,
     default="aamsoftmax",
 )
 
@@ -206,8 +206,6 @@ class LIDTask(AbsTask):
         preprocessor_choices,
         loss_choices,
     ]
-
-    trainer = LIDTrainer
 
     @classmethod
     def add_task_arguments(cls, parser: argparse.ArgumentParser):
@@ -253,8 +251,8 @@ class LIDTask(AbsTask):
             "--lang2utt",
             type=str,
             default="",
-            help="Directory of the train lang2utt file to be used in label mapping" \
-            "Note that both train and validation use the same lang2utt file, since" \
+            help="Directory of the train lang2utt file to be used in label mapping"
+            "Note that both train and validation use the same lang2utt file, since"
             "we can only support the same categories during validation",
         )
 
@@ -324,19 +322,25 @@ class LIDTask(AbsTask):
             # train
             retval = ("speech", "lid_labels")
         elif not train and not inference:
-            # validation or plot tsne
-            retval = ("speech", "lid_labels")
+            # validation or plot tsne or collect statistics
+            retval = ("speech",)
         else:
             # inference
             retval = ("speech",)
-        
+
         return retval
 
     @classmethod
     def optional_data_names(
         cls, train: bool = True, inference: bool = False
     ) -> Tuple[str, ...]:
-        retval = ()
+        if not train and not inference:
+            # validation or plot tsne
+            # not required for collect statistics
+            retval = ("lid_labels",)
+        else:
+            # train or inference
+            retval = ()
 
         return retval
 

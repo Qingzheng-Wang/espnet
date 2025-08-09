@@ -2252,7 +2252,8 @@ class LIDPreprocessor(CommonPreprocessor):
     Args:
         train (bool): Whether to use in training mode.
         lang2utt (str): Path to the `lang2utt` file.
-        target_duration (float): Target duration in seconds, if fix_duration, clip to this duration.
+        target_duration (float): Target duration in seconds, if
+        fix_duration, clip to this duration.
         fix_duration (bool): Whether to fix the duration of the audio.
         sample_rate (int): Sampling rate.
         rir_scp (str): Path to the RIR scp file.
@@ -2289,7 +2290,9 @@ class LIDPreprocessor(CommonPreprocessor):
         self.lang2label = None  # a dictionary that maps string speaker label to int
         self.lang2vec = None
         self.sample_rate = sample_rate
-        self.target_duration = int(target_duration * sample_rate) if target_duration else None
+        self.target_duration = (
+            int(target_duration * sample_rate) if target_duration else None
+        )
         self.fix_duration = fix_duration
         self.train = train
         self.lang2utt_path = lang2utt
@@ -2307,6 +2310,8 @@ class LIDPreprocessor(CommonPreprocessor):
         self.noise_probs = []
         self.noise_db_ranges = []
         self.noise_num_to_mix = []
+        if noise_info is None:
+            noise_info = []
         if noise_apply_prob > 0:
             for prob, noise_scp, num_to_mix, db_range in noise_info:
                 if prob > 0:
@@ -2338,7 +2343,7 @@ class LIDPreprocessor(CommonPreprocessor):
             msg += f", target_duration={self.target_duration}"
         else:
             msg += f", fix_duration={self.fix_duration}"
-        msg + f", sample_rate={self.sample_rate}"
+        msg += f", sample_rate={self.sample_rate}"
         if self.rirs is not None and self.rir_apply_prob > 0:
             msg += f", rir_scp={self.rir_scp}, rir_apply_prob={self.rir_apply_prob}"
         if self.noise_apply_prob > 0 and self.noises:
@@ -2369,12 +2374,13 @@ class LIDPreprocessor(CommonPreprocessor):
             startframe = np.array(
                 [np.int64(random.random() * (len(audio) - self.target_duration))]
             )
-            # random select the start of the speech, and only use the target duration of speech
+            # Random select the start of the speech,
+            # and only use the target duration of speech
             data["speech"] = audio[
                 int(startframe) : int(startframe) + self.target_duration
             ]
 
-        if self.train and self.noise_apply_prob > 0 or self.rir_apply_prob > 0:
+        if self.train and (self.noise_apply_prob > 0 or self.rir_apply_prob > 0):
             data["speech"] = self._apply_data_augmentation(data["speech"])
 
         return data
