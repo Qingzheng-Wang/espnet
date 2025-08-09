@@ -36,7 +36,10 @@ from espnet2.optimizers.optim_groups import configure_optimizer
 from espnet2.optimizers.sgd import SGD
 from espnet2.samplers.build_batch_sampler import BATCH_TYPES, build_batch_sampler
 from espnet2.samplers.category_balanced_sampler import CategoryBalancedSampler
-from espnet2.samplers.category_power_sampler import CategoryPowerSampler, CategoryDatasetPowerSampler
+from espnet2.samplers.category_power_sampler import (
+    CategoryDatasetPowerSampler,
+    CategoryPowerSampler,
+)
 from espnet2.samplers.unsorted_batch_sampler import UnsortedBatchSampler
 from espnet2.schedulers.cosine_anneal_warmup_restart import (
     CosineAnnealingWarmupRestarts,
@@ -806,6 +809,44 @@ class AbsTask(ABC):
             default=10,
             help="The sample size for category chunk iterator",
         )
+        group.add_argument(
+            "--upsampling_factor",
+            type=float,
+            default=0.5,
+            help="Used when batch_type='catpow' (CategoryPowerSampler), "
+            "for upsample low-resource category",
+        )
+        group.add_argument(
+            "--category_upsampling_factor",
+            type=float,
+            default=0.5,
+            help="Used when batch_type='catpow_balance_dataset' "
+            "(CategoryDatasetPowerSampler), "
+            "for upsample low-resource category and dataset",
+        )
+        group.add_argument(
+            "--dataset_upsampling_factor",
+            type=float,
+            default=0.5,
+            help="Used when batch_type='catpow_balance_dataset' "
+            "(CategoryDatasetPowerSampler), "
+            "for upsample low-resource category and dataset",
+        )
+        group.add_argument(
+            "--dataset_scaling_factor",
+            type=float,
+            default=1.2,
+            help="Used when batch_type='catpow' (CategoryPowerSampler) or "
+            "'catpow_balance_dataset' (CategoryDatasetPowerSampler), "
+            "control the scaled dataset size after upsampling",
+        )
+        group.add_argument(
+            "--max_batch_size",
+            type=int_or_none,
+            default=None,
+            help="Max batch size for CategoryPowerSampler "
+            "and CategoryDatasetPowerSampler",
+        )
 
         group.add_argument("--train_shape_file", type=str, action="append", default=[])
         group.add_argument("--valid_shape_file", type=str, action="append", default=[])
@@ -1290,7 +1331,8 @@ class AbsTask(ABC):
             node_rank = get_node_rank(args.dist_rank, args.dist_launcher)
 
             # The following block is copied from:
-            # https://github.com/pytorch/pytorch/blob/master/torch/multiprocessing/spawn.py
+            # https://github.com/pytorch/pytorch/blob/master/torch/
+            # multiprocessing/spawn.py
             error_files = []
             processes = []
             mp = torch.multiprocessing.get_context("spawn")
@@ -1939,7 +1981,9 @@ class AbsTask(ABC):
             sampler_args = dict(
                 batch_size=iter_options.batch_size,
                 min_batch_size=(
-                    torch.distributed.get_world_size() if iter_options.distributed else 1
+                    torch.distributed.get_world_size()
+                    if iter_options.distributed
+                    else 1
                 ),
                 drop_last=args.drop_last_iter,
                 category2utt_file=category2utt_file,
@@ -1953,7 +1997,9 @@ class AbsTask(ABC):
                 batch_bins=iter_options.batch_bins,
                 shape_files=iter_options.shape_files,
                 min_batch_size=(
-                    torch.distributed.get_world_size() if iter_options.distributed else 1
+                    torch.distributed.get_world_size()
+                    if iter_options.distributed
+                    else 1
                 ),
                 max_batch_size=args.max_batch_size,
                 upsampling_factor=args.upsampling_factor,
@@ -1967,7 +2013,8 @@ class AbsTask(ABC):
             batch_sampler = CategoryPowerSampler(**sampler_args)
         elif iter_options.batch_type == "catpow_balance_dataset":
             if Path(
-                Path(iter_options.data_path_and_name_and_type[0][0]).parent, "dataset2utt"
+                Path(iter_options.data_path_and_name_and_type[0][0]).parent,
+                "dataset2utt",
             ).exists():
                 dataset2utt_file = str(
                     Path(
@@ -1979,11 +2026,13 @@ class AbsTask(ABC):
             else:
                 dataset2utt_file = None
                 raise ValueError(
-                    f"dataset2utt mandatory for catpow_balance_dataset batch sampler, but not found {dataset2utt_file}"
+                    f"dataset2utt mandatory for catpow_balance_dataset batch sampler, "
+                    f"but not found {dataset2utt_file}"
                 )
 
             if Path(
-                Path(iter_options.data_path_and_name_and_type[0][0]).parent, "utt2dataset"
+                Path(iter_options.data_path_and_name_and_type[0][0]).parent,
+                "utt2dataset",
             ).exists():
                 utt2dataset_file = str(
                     Path(
@@ -1995,13 +2044,16 @@ class AbsTask(ABC):
             else:
                 utt2dataset_file = None
                 raise ValueError(
-                    f"utt2dataset mandatory for catpow_balance_dataset batch sampler, but not found {utt2dataset_file}"
+                    f"utt2dataset mandatory for catpow_balance_dataset batch sampler, "
+                    f"but not found {utt2dataset_file}"
                 )
             sampler_args = dict(
                 batch_bins=iter_options.batch_bins,
                 shape_files=iter_options.shape_files,
                 min_batch_size=(
-                    torch.distributed.get_world_size() if iter_options.distributed else 1
+                    torch.distributed.get_world_size()
+                    if iter_options.distributed
+                    else 1
                 ),
                 max_batch_size=args.max_batch_size,
                 category_upsampling_factor=args.category_upsampling_factor,
@@ -2027,7 +2079,11 @@ class AbsTask(ABC):
                 key_file=key_file,
             )
         else:
-            raise ValueError(f"batch_type={iter_options.batch_type} is not supported")
+            raise ValueError(
+                f"batch_type={iter_options.batch_type} is not supported"
+                "Please specify batch_type in catbel, catpow, "
+                "catpow_balance_dataset, unsorted."
+            )
 
         batches = list(batch_sampler)
 
