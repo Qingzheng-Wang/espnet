@@ -181,7 +181,6 @@ scheduler_classes = dict(
     CosineAnnealingWarmupRestarts=CosineAnnealingWarmupRestarts,
     tristagelr=TristageLR,
     ExponentialDecayWarmup=ExponentialDecayWarmup,
-    tristagelr=TristageLR,
 )
 # To lower keys
 optim_classes = {k.lower(): v for k, v in optim_classes.items()}
@@ -865,38 +864,11 @@ class AbsTask(ABC):
             help=_batch_type_help,
         )
         group.add_argument(
-            "--upsampling_factor",
-            type=float,
-            default=0.5,
-            help="Used when batch_type='catpow' (CategoryPowerSampler), " \
-            "for upsample low-resource catageory",
-        )
-        group.add_argument(
             "--language_upsampling_factor",
             type=float,
             default=0.5,
             help="Used when batch_type='catpow_balance_dataset' (CategoryPowerSamplerBalancedDataset), " \
             "for upsample low-resource catageory and dataset",
-        )
-        group.add_argument(
-            "--dataset_upsampling_factor",
-            type=float,
-            default=0.5,
-            help="Used when batch_type='catpow_balance_dataset' (CategoryPowerSamplerBalancedDataset), " \
-            "for upsample low-resource catageory and dataset",
-        )
-        group.add_argument(
-            "--dataset_scaling_factor",
-            type=float,
-            default=1.2,
-            help="Used when batch_type='catpow' (CategoryPowerSampler), " \
-            "control the scaled dataset size after upsampling",
-        )
-        group.add_argument(
-            "--max_batch_size",
-            type=int_or_none,
-            default=None,
-            help="Max batch size for CategoryPowerSampler",
         )
         group.add_argument(
             "--valid_batch_type",
