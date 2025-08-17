@@ -848,6 +848,13 @@ class AbsTask(ABC):
             help="Max batch size for CategoryPowerSampler "
             "and CategoryDatasetPowerSampler",
         )
+        group.add_argument(
+            "--min_batch_size",
+            type=int,
+            default=1,
+            help="Min batch size for CategoryPowerSampler "
+            "and CategoryDatasetPowerSampler",
+        )
 
         group.add_argument("--train_shape_file", type=str, action="append", default=[])
         group.add_argument("--valid_shape_file", type=str, action="append", default=[])
@@ -1957,7 +1964,7 @@ class AbsTask(ABC):
                 min_batch_size=(
                     torch.distributed.get_world_size()
                     if iter_options.distributed
-                    else 1
+                    else args.min_batch_size
                 ),
                 drop_last=args.drop_last_iter,
                 category2utt_file=category2utt_file,
@@ -1973,7 +1980,7 @@ class AbsTask(ABC):
                 min_batch_size=(
                     torch.distributed.get_world_size()
                     if iter_options.distributed
-                    else 1
+                    else args.min_batch_size
                 ),
                 max_batch_size=args.max_batch_size,
                 upsampling_factor=args.upsampling_factor,
@@ -2027,7 +2034,7 @@ class AbsTask(ABC):
                 min_batch_size=(
                     torch.distributed.get_world_size()
                     if iter_options.distributed
-                    else 1
+                    else args.min_batch_size
                 ),
                 max_batch_size=args.max_batch_size,
                 category_upsampling_factor=args.category_upsampling_factor,
@@ -2065,6 +2072,8 @@ class AbsTask(ABC):
             batches = batches[: iter_options.num_batches]
 
         bs_list = [len(batch) for batch in batches]
+
+        logging.info(f"+++++++++++++++++len batches: {len(batches)}")
 
         logging.info(f"[{mode}] dataset:\n{dataset}")
         logging.info(f"[{mode}] Batch sampler: {batch_sampler}")
@@ -2225,7 +2234,9 @@ class AbsTask(ABC):
         sampler_args = dict(
             batch_size=args.category_sample_size,
             min_batch_size=(
-                torch.distributed.get_world_size() if iter_options.distributed else 1
+                torch.distributed.get_world_size()
+                if iter_options.distributed
+                else args.min_batch_size
             ),
             drop_last=args.drop_last_iter,
             category2utt_file=category2utt_file,

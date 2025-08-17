@@ -107,6 +107,12 @@ ESPnet uses [pytorch](http://pytorch.org/) as a deep learning engine and also fo
 - Self-supervised learning representations as features, using upstream models in [S3PRL](https://github.com/s3prl/s3prl) in frontend.
   - Set `frontend` to `s3prl`
   - Select any upstream model by setting the `frontend_conf` to the corresponding name.
+  - **Note**: For geolocation-conditioned LID features, use the modified S3PRL version:
+    ```bash
+    git clone https://github.com/Qingzheng-Wang/s3prl.git
+    cd s3prl
+    pip install -e .
+    ```
 - Transfer Learning :
   - easy usage and transfers from models previously trained by your group or models from [ESPnet Hugging Face repository](https://huggingface.co/espnet).
   - [Documentation](https://github.com/espnet/espnet/tree/master/egs2/mini_an4/asr1/transfer_learning.md) and [toy example runnable on colab](https://github.com/espnet/notebook/blob/master/ESPnet2/Demo/ASR/asr_transfer_learning_demo.ipynb).
