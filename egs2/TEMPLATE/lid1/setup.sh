@@ -41,16 +41,16 @@ done
 
 
 # Symlinks to TEMPLATE/lid1
-for f in lid.sh path.sh scripts pyscripts; do
+for f in db.sh lid.sh path.sh; do
     target=../../TEMPLATE/lid1/"${f}"
     ln -sf "${target}" "${dir}"
     targets+="${target} "
 done
 
 
-# Symlinks to TEMPLATE/lid1
-for f in db.sh utils steps; do
-    target=../../TEMPLATE/lid1/"${f}"
+# Symlinks to TEMPLATE/asr1
+for f in pyscripts scripts steps utils; do
+    target=../../TEMPLATE/asr1/"${f}"
     ln -sf "${target}" "${dir}"
     targets+="${target} "
 done
