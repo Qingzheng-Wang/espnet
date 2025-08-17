@@ -814,24 +814,28 @@ class AbsTask(ABC):
             "--upsampling_factor",
             type=float,
             default=0.5,
-            help="Used when batch_type='catpow' (CategoryPowerSampler), "
-            "for upsample low-resource category",
+            help="Upsampling factor for low-resource categories when using "
+            "batch_type='catpow' (CategoryPowerSampler). "
+            "Lower values (-> 0) increase sampling of rare categories, "
+            "higher values (-> 1.0) reduce upsampling. Default: 0.5",
         )
         group.add_argument(
             "--category_upsampling_factor",
             type=float,
             default=0.5,
-            help="Used when batch_type='catpow_balance_dataset' "
-            "(CategoryDatasetPowerSampler), "
-            "for upsample low-resource category and dataset",
+            help="Upsampling factor for datasets with fewer samples when using "
+            "batch_type='catpow_balance_dataset' (CategoryDatasetPowerSampler). "
+            "Lower values (-> 0) increase sampling of rare categories, "
+            "higher values (-> 1.0) reduce upsampling. Default: 0.5",
         )
         group.add_argument(
             "--dataset_upsampling_factor",
             type=float,
             default=0.5,
-            help="Used when batch_type='catpow_balance_dataset' "
-            "(CategoryDatasetPowerSampler), "
-            "for upsample low-resource category and dataset",
+            help="Upsampling factor for low-resource datasets when using "
+            "batch_type='catpow_balance_dataset' (CategoryDatasetPowerSampler). "
+            "Lower values (-> 0) increase sampling of rare datasets, "
+            "higher values (-> 1.0) reduce upsampling. Default: 0.5",
         )
         group.add_argument(
             "--dataset_scaling_factor",
@@ -852,8 +856,7 @@ class AbsTask(ABC):
             "--min_batch_size",
             type=int,
             default=1,
-            help="Min batch size for CategoryPowerSampler "
-            "and CategoryDatasetPowerSampler",
+            help="Min batch size for batch samplers.",
         )
 
         group.add_argument("--train_shape_file", type=str, action="append", default=[])
@@ -1874,7 +1877,9 @@ class AbsTask(ABC):
             sort_batch=args.sort_batch,
             drop_last=args.drop_last_iter,
             min_batch_size=(
-                torch.distributed.get_world_size() if iter_options.distributed else 1
+                torch.distributed.get_world_size()
+                if iter_options.distributed
+                else args.min_batch_size
             ),
             utt2category_file=utt2category_file,
         )
@@ -1942,15 +1947,10 @@ class AbsTask(ABC):
             dataset, args.allow_variable_data_keys, train=iter_options.train
         )
 
-        if Path(
-            Path(iter_options.data_path_and_name_and_type[0][0]).parent, "category2utt"
-        ).exists():
-            category2utt_file = str(
-                Path(
-                    Path(iter_options.data_path_and_name_and_type[0][0]).parent,
-                    "category2utt",
-                )
-            )
+        parent_dir = Path(iter_options.data_path_and_name_and_type[0][0]).parent
+
+        if Path(parent_dir, "category2utt").exists():
+            category2utt_file = str(Path(parent_dir, "category2utt"))
             logging.warning("Reading " + category2utt_file)
         else:
             category2utt_file = None
@@ -1993,40 +1993,28 @@ class AbsTask(ABC):
             )
             batch_sampler = CategoryPowerSampler(**sampler_args)
         elif iter_options.batch_type == "catpow_balance_dataset":
-            if Path(
-                Path(iter_options.data_path_and_name_and_type[0][0]).parent,
-                "dataset2utt",
-            ).exists():
-                dataset2utt_file = str(
-                    Path(
-                        Path(iter_options.data_path_and_name_and_type[0][0]).parent,
-                        "dataset2utt",
-                    )
-                )
+            if Path(parent_dir, "dataset2utt").exists():
+                dataset2utt_file = str(Path(parent_dir, "dataset2utt"))
                 logging.warning("Reading " + dataset2utt_file)
             else:
                 dataset2utt_file = None
                 raise ValueError(
                     f"dataset2utt mandatory for catpow_balance_dataset batch sampler, "
-                    f"but not found {dataset2utt_file}"
+                    f"but not found {dataset2utt_file}. To create a dataset2utt "
+                    "file, please refer to the script in "
+                    "`egs2/geolid/lid1/local/create_utt2dataset_dataset2utt.sh`"
                 )
 
-            if Path(
-                Path(iter_options.data_path_and_name_and_type[0][0]).parent,
-                "utt2dataset",
-            ).exists():
-                utt2dataset_file = str(
-                    Path(
-                        Path(iter_options.data_path_and_name_and_type[0][0]).parent,
-                        "utt2dataset",
-                    )
-                )
+            if Path(parent_dir, "utt2dataset").exists():
+                utt2dataset_file = str(Path(parent_dir, "utt2dataset"))
                 logging.warning("Reading " + utt2dataset_file)
             else:
                 utt2dataset_file = None
                 raise ValueError(
                     f"utt2dataset mandatory for catpow_balance_dataset batch sampler, "
-                    f"but not found {utt2dataset_file}"
+                    f"but not found {utt2dataset_file}. To create a dataset2utt "
+                    "file, please refer to the script in "
+                    "`egs2/geolid/lid1/local/create_utt2dataset_dataset2utt.sh`"
                 )
             sampler_args = dict(
                 batch_bins=iter_options.batch_bins,
@@ -2218,33 +2206,99 @@ class AbsTask(ABC):
             dataset, args.allow_variable_data_keys, train=iter_options.train
         )
 
-        if Path(
-            Path(iter_options.data_path_and_name_and_type[0][0]).parent, "category2utt"
-        ).exists():
-            category2utt_file = str(
-                Path(
-                    Path(iter_options.data_path_and_name_and_type[0][0]).parent,
-                    "category2utt",
-                )
-            )
+        parent_dir = Path(iter_options.data_path_and_name_and_type[0][0]).parent
+
+        if Path(parent_dir, "category2utt").exists():
+            category2utt_file = str(Path(parent_dir, "category2utt"))
             logging.warning("Reading " + category2utt_file)
         else:
             category2utt_file = None
 
-        sampler_args = dict(
-            batch_size=args.category_sample_size,
-            min_batch_size=(
-                torch.distributed.get_world_size()
-                if iter_options.distributed
-                else args.min_batch_size
-            ),
-            drop_last=args.drop_last_iter,
-            category2utt_file=category2utt_file,
-            epoch=1,
-            num_batches=iter_options.num_batches,
-            distributed=iter_options.distributed,
-        )
-        batch_sampler = CategoryBalancedSampler(**sampler_args)
+        if iter_options.batch_type == "catbel":
+            sampler_args = dict(
+                batch_size=iter_options.batch_size,
+                min_batch_size=(
+                    torch.distributed.get_world_size()
+                    if iter_options.distributed
+                    else args.min_batch_size
+                ),
+                drop_last=args.drop_last_iter,
+                category2utt_file=category2utt_file,
+                epoch=1,
+                num_batches=iter_options.num_batches,
+                distributed=iter_options.distributed,
+            )
+            batch_sampler = CategoryBalancedSampler(**sampler_args)
+        elif iter_options.batch_type == "catpow":
+            sampler_args = dict(
+                batch_bins=iter_options.batch_bins,
+                shape_files=iter_options.shape_files,
+                min_batch_size=(
+                    torch.distributed.get_world_size()
+                    if iter_options.distributed
+                    else args.min_batch_size
+                ),
+                max_batch_size=args.max_batch_size,
+                upsampling_factor=args.upsampling_factor,
+                dataset_scaling_factor=args.dataset_scaling_factor,
+                drop_last=args.drop_last_iter,
+                category2utt_file=category2utt_file,
+                epoch=1,
+                num_batches=iter_options.num_batches,
+                distributed=iter_options.distributed,
+            )
+            batch_sampler = CategoryPowerSampler(**sampler_args)
+        elif iter_options.batch_type == "catpow_balance_dataset":
+            if Path(parent_dir, "dataset2utt").exists():
+                dataset2utt_file = str(Path(parent_dir, "dataset2utt"))
+                logging.warning("Reading " + dataset2utt_file)
+            else:
+                dataset2utt_file = None
+                raise ValueError(
+                    f"dataset2utt mandatory for catpow_balance_dataset batch sampler, "
+                    f"but not found {dataset2utt_file}. To create a dataset2utt "
+                    "file, please refer to the script in "
+                    "`egs2/geolid/lid1/local/create_utt2dataset_dataset2utt.sh`"
+                )
+
+            if Path(parent_dir, "utt2dataset").exists():
+                utt2dataset_file = str(Path(parent_dir, "utt2dataset"))
+                logging.warning("Reading " + utt2dataset_file)
+            else:
+                utt2dataset_file = None
+                raise ValueError(
+                    f"utt2dataset mandatory for catpow_balance_dataset batch sampler, "
+                    f"but not found {utt2dataset_file}. To create a dataset2utt "
+                    "file, please refer to the script in "
+                    "`egs2/geolid/lid1/local/create_utt2dataset_dataset2utt.sh`"
+                )
+            sampler_args = dict(
+                batch_bins=iter_options.batch_bins,
+                shape_files=iter_options.shape_files,
+                min_batch_size=(
+                    torch.distributed.get_world_size()
+                    if iter_options.distributed
+                    else args.min_batch_size
+                ),
+                max_batch_size=args.max_batch_size,
+                category_upsampling_factor=args.category_upsampling_factor,
+                dataset_upsampling_factor=args.dataset_upsampling_factor,
+                dataset_scaling_factor=args.dataset_scaling_factor,
+                drop_last=args.drop_last_iter,
+                category2utt_file=category2utt_file,
+                dataset2utt_file=dataset2utt_file,
+                utt2dataset_file=utt2dataset_file,
+                epoch=1,
+                num_batches=iter_options.num_batches,
+                distributed=iter_options.distributed,
+            )
+            batch_sampler = CategoryDatasetPowerSampler(**sampler_args)
+        else:
+            raise ValueError(
+                f"batch_type={iter_options.batch_type} is not supported "
+                "with iterator_type category_chunk. Please specify batch_type "
+                "in catbel, catpow, catpow_balance_dataset."
+            )
 
         batches = list(batch_sampler)
         if iter_options.num_batches is not None:
