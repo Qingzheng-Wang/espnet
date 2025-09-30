@@ -37,6 +37,7 @@ from espnet2.torch_utils.initialize import initialize
 from espnet2.speechlm.continuous_encoder.continuous_encoder import (
     AbsContinuousEncoder,
     HuggingfaceVisionEncoder,
+    SpeechOWSMEncoder,
 )
 
 # Others
@@ -94,6 +95,15 @@ vision_encoder_choices = ClassChoices(
     default=None,
 )
 
+speech_owsm_encoder_choices = ClassChoices(
+    "speech_owsm_encoder",
+    classes=dict(
+        owsm=SpeechOWSMEncoder,
+    ),
+    type_check=AbsContinuousEncoder,
+    default=None,
+)
+
 model_choices = ClassChoices(
     "model",
     classes=dict(
@@ -119,6 +129,8 @@ class SpeechLMTask(AbsTask):
         tokenizer_choices,
         # --vision_encoder and --vision_encoder_conf
         vision_encoder_choices,
+        # --speech_owsm_encoder and --speech_owsm_encoder_conf
+        speech_owsm_encoder_choices,
         # --model and --model_conf
         model_choices,
     ]
@@ -293,6 +305,37 @@ class SpeechLMTask(AbsTask):
             default=0.0,
             help="Z loss weight to reduce the magnituede of logits",
         )
+        # speech owsm encoder related
+        group.add_argument(
+            "--speech_fs",
+            type=int,
+            default=16000,
+            help="The sampling frequency of the audio if use speech_owsm_encoder",
+        )
+        group.add_argument(
+            "--speech_length",
+            type=float,
+            default=30.0,
+            help="The length of the audio if use speech_owsm_encoder",
+        )
+        group.add_argument(
+            "--speech_resolution",
+            type=float,
+            default=0.02,
+            help="The resolution of the audio if use speech_owsm_encoder",
+        )
+        group.add_argument(
+            "--speech_init_silence",
+            type=float,
+            default=1.0,
+            help="The initial silence of the audio if use speech_owsm_encoder",
+        )
+        group.add_argument(
+            "--speech_dtype",
+            type=str,
+            default="float16",
+            help="The dtype of the audio if use speech_owsm_encoder",
+        )
 
         for class_choices in cls.class_choices_list:
             # Append --<name> and --<name>_conf.
@@ -342,6 +385,11 @@ class SpeechLMTask(AbsTask):
             asr_time_mask_config=args.asr_time_mask_config,
             audio_modality=getattr(args, "audio_modality", "codec_ssl"),
             vision_encoder_processor_conf=getattr(args, "vision_encoder_conf", {}),
+            speech_fs=args.speech_fs,
+            speech_length=args.speech_length,
+            speech_resolution=args.speech_resolution,
+            speech_init_silence=args.speech_init_silence,
+            speech_dtype=args.speech_dtype,
             is_dpo=args.model == "dpo",
         )
 
@@ -413,6 +461,14 @@ class SpeechLMTask(AbsTask):
                 continuous_encoders[modality] = continuous_encoder_class(
                     **getattr(args, f"{modality}_conf")
                 )
+        for modality in ["speech_owsm_encoder"]:
+            if getattr(args, modality, None) is not None:
+                continuous_encoder_class = speech_owsm_encoder_choices.get_class(
+                    getattr(args, modality)
+                )
+                continuous_encoders[modality] = continuous_encoder_class(
+                    **getattr(args, f"{modality}_conf")
+                )
 
         # 3. Build CoreLM module
         corelm_class = corelm_choices.get_class(args.corelm)
@@ -447,6 +503,7 @@ class SpeechLMTask(AbsTask):
             initialize(model, args.init)
         # skip this when using HF transformers
         elif args.transformer_conf.get("hf_model_tag", None) is None:
+            # only init when not use HF pretrained model
             for m in model.modules():
                 if isinstance(m, torch.nn.Linear):
                     torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)

@@ -16,6 +16,7 @@ from typeguard import typechecked
 from PIL import Image
 from copy import deepcopy
 
+from espnet2.fileio.sound_scp import soundfile_read
 import espnet2.speechlm.definitions as speechlm_definitions
 from espnet2.layers.augmentation import DataAugmentation
 from espnet2.text.build_tokenizer import build_tokenizer
@@ -2376,6 +2377,115 @@ class S2TPreprocessor(CommonPreprocessor):
         return data
 
 
+class S2TPreprocessorSpeechOnly(CommonPreprocessor):
+    def __init__(
+        self,
+        train: bool,
+        token_type: Optional[str] = None,
+        token_list: Union[Path, str, Iterable[str]] = None,
+        bpemodel: Union[Path, str, Iterable[str]] = None,
+        text_cleaner: Collection[str] = None,
+        g2p_type: Optional[str] = None,
+        unk_symbol: str = "<unk>",
+        space_symbol: str = "<space>",
+        non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
+        delimiter: Optional[str] = None,
+        rir_scp: Optional[str] = None,
+        rir_apply_prob: float = 1.0,
+        noise_scp: Optional[str] = None,
+        noise_apply_prob: float = 1.0,
+        noise_db_range: str = "3_10",
+        short_noise_thres: float = 0.5,
+        speech_volume_normalize: float = None,
+        speech_name: str = "speech",
+        text_name: str = "text",
+        text_prev_name: str = "text_prev",
+        text_ctc_name: str = "text_ctc",
+        fs: int = 16000,
+        na_symbol: str = "<na>",  # text is not available e.g. for prev or ctc
+        speech_length: float = 30,  # pad or trim speech to this value in seconds
+        speech_resolution: float = 0.02,  # speech time resolution
+        speech_init_silence: float = 1.0,  # max silence before speech for data aug
+        text_prev_apply_prob: float = 0.5,  # whether to condition on text_prev
+        time_apply_prob: float = 0.5,  # whether to include timestamps
+        notime_symbol: str = "<notimestamps>",
+        first_time_symbol: str = "<0.00>",
+        last_time_symbol: str = "<30.00>",
+    ):
+        super().__init__(
+            train=train,
+            token_type=token_type,
+            token_list=token_list,
+            bpemodel=bpemodel,
+            text_cleaner=text_cleaner,
+            g2p_type=g2p_type,
+            unk_symbol=unk_symbol,
+            space_symbol=space_symbol,
+            non_linguistic_symbols=non_linguistic_symbols,
+            delimiter=delimiter,
+            rir_scp=rir_scp,
+            rir_apply_prob=rir_apply_prob,
+            noise_scp=noise_scp,
+            noise_apply_prob=noise_apply_prob,
+            noise_db_range=noise_db_range,
+            short_noise_thres=short_noise_thres,
+            speech_volume_normalize=speech_volume_normalize,
+            speech_name=speech_name,
+            text_name=text_name,
+            fs=fs,
+        )
+        self.text_prev_name = text_prev_name
+        self.text_ctc_name = text_ctc_name
+        self.speech_length = int(speech_length * fs)
+        self.speech_resolution = int(speech_resolution * fs)
+        self.speech_init_silence = int(speech_init_silence * fs)
+        self.text_prev_apply_prob = text_prev_apply_prob
+        self.time_apply_prob = time_apply_prob
+
+    @typechecked
+    def _pad_or_trim_speech(
+        self, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Tuple[Dict[str, Union[str, np.ndarray]], int]:
+
+        init_pad = 0
+        if self.speech_name in data:
+            speech = data[self.speech_name]
+
+            # speech: (Nmic, Time)
+            if speech.ndim == 1:
+                speech = speech[None, :]
+            else:
+                speech = speech.T
+
+            # Add silence to the left
+            if self.train and speech.shape[-1] < self.speech_length:
+                init_pad = np.random.randint(
+                    min(self.speech_length - speech.shape[-1], self.speech_init_silence)
+                    + 1
+                )
+                speech = np.pad(speech, ((0, 0), (init_pad, 0)))
+
+            # Pad or trim to max_samples
+            if speech.shape[-1] < self.speech_length:
+                speech = np.pad(
+                    speech, ((0, 0), (0, self.speech_length - speech.shape[-1]))
+                )
+            else:
+                speech = speech[:, : self.speech_length]
+
+            data[self.speech_name] = speech.T  # convert back to time first
+
+        return data, init_pad
+    
+    def __call__(self, data: np.ndarray) -> np.ndarray:
+        data_dict = {self.speech_name: data}
+        data_dict = self._speech_process(data_dict)
+        data_dict, init_pad = self._pad_or_trim_speech(data_dict)
+        data = data_dict[self.speech_name]
+
+        return data
+
+
 class SpeechLMPreprocessor(AbsPreprocessor):
     """Preprocessor specifically for SpeechLM models"""
 
@@ -2407,6 +2517,12 @@ class SpeechLMPreprocessor(AbsPreprocessor):
         image_token_per_patch: int = 1,
         # vision encoder
         vision_encoder_processor_conf: Optional[dict] = {},
+        # owsm encoder
+        speech_fs: int = 16000,
+        speech_length: float = 30.0,
+        speech_resolution: float = 0.02,
+        speech_init_silence: float = 1.0,
+        speech_dtype: str = "float16", # TODO(qingzheng): undetermined, should it be what? 
         # others
         n_ctx: int = 4096,
         inter_segment_pad: int = 0,
@@ -2422,7 +2538,7 @@ class SpeechLMPreprocessor(AbsPreprocessor):
         self.train = train
         self.encoder_decoder_format = encoder_decoder_format
         self.audio_modality = audio_modality
-        self.n_ctx = n_ctx - codec_token_in_use  # in case this is delay interleave
+        self.n_ctx = n_ctx  # in case this is delay interleave, self.n_ctx = n_ctx - codec_token_in_use
         self.inter_segment_pad = inter_segment_pad
         self.pad = token_list.index("<pad>")
         self.unk = token_list.index("<unk>")
@@ -2517,6 +2633,17 @@ class SpeechLMPreprocessor(AbsPreprocessor):
                 )
         else:
             self.vision_encoder_processor = None
+        
+        # owsm encoder
+        self.owsm_encoder_preprocessor = S2TPreprocessorSpeechOnly(
+            train,
+            fs=speech_fs,
+            speech_length=speech_length,
+            speech_resolution=speech_resolution,
+            speech_init_silence=speech_init_silence,
+        )
+        self.speech_dtype = speech_dtype
+        self.owsm_encoder_feat_len = 375 # frame rate is 80ms, 30s * 1000 / 80ms = 375
 
         # extra entries
         self.extra_names_and_modalities = [
@@ -2618,10 +2745,10 @@ class SpeechLMPreprocessor(AbsPreprocessor):
             raise NotImplementedError('encoder decoder is not supported yet')
         else:
             seqs = [sos_eos] + [task_identifier] + seqs
-            dec_seq = np.concatenate(seqs, axis=0).reshape(-1, self.codec_token_in_use)
+            dec_seq = np.concatenate(seqs, axis=0).reshape(-1, self.codec_token_in_use) # codec_token_in_use should be 0 in OWSM encoder + LLM case
 
             special_loss_mask = np.zeros_like(sos_eos) + int(self.loss_region == "whole")
-            loss_masks = [special_loss_mask] * 2 + loss_masks
+            loss_masks = [special_loss_mask] * 2 + loss_masks # only the text token part is 1
             loss_mask = np.concatenate(loss_masks, axis=0).reshape(dec_seq.shape)
             loss_mask[dec_seq == 0] = 0
 
@@ -2640,7 +2767,7 @@ class SpeechLMPreprocessor(AbsPreprocessor):
         new_conti_feats = []
         modality_identifier_indices = np.nonzero(
             (dec_seq[:, 0] >= 32) & (dec_seq[:, 0] < 64)
-        )[0]
+        )[0] # 找"<{modality}_start/end>"这个token的位置
         for conti_feat, modality, idx, conti_len in conti_feats:
             if conti_feat is not None:
                 start = modality_identifier_indices[idx] + 1
@@ -2779,7 +2906,18 @@ class SpeechLMPreprocessor(AbsPreprocessor):
             value = self.special_token("<pad>")
             conti_len = self.vision_encoder_feat_len
             value = np.repeat(value, conti_len)
-
+        
+        elif modality in ["speech_owsm_encoder"]:
+            if isinstance(value, tuple):
+                # value is a tuple of (int, np.ndarray), i.e. (fs, audio)
+                if isinstance(value[0], int):
+                    value = value[1]
+                else:
+                    value = value[0]
+            conti_feat = self.owsm_encoder_preprocessor(value)
+            value = self.special_token("<pad>")
+            conti_len = self.owsm_encoder_feat_len
+            value = np.repeat(value, conti_len)
         else:
             raise NotImplementedError(f"Modality: {modality}")
     

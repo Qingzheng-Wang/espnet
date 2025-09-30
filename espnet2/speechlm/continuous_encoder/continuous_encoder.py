@@ -5,6 +5,7 @@
 
 import torch
 from abc import ABC, abstractmethod
+from espnet2.tasks.s2t import S2TTask
 
 class AbsContinuousEncoder(torch.nn.Module):
     """ Abstract class for continuous encoders """
@@ -104,4 +105,33 @@ class HuggingfaceVisionEncoder(AbsContinuousEncoder):
     def forward_encoder(self, feat_list: list):
         feats = torch.stack(feat_list, dim=0)
         feats = self.model(feats).last_hidden_state
+        return feats
+
+class SpeechOWSMEncoder(AbsContinuousEncoder):
+    """A warpper for Speech OWSM Encoder """
+
+    def __init__(
+        self,
+        s2t_train_config,
+        s2t_model_file,
+        freeze: bool = True,
+        connector_choice: str = "linear",
+        device: str = "cuda",
+    ):
+        super(SpeechOWSMEncoder, self).__init__()
+        self.model, owsm_train_args = S2TTask.build_model_from_file(
+            s2t_train_config, s2t_model_file, device
+        ) # Note: this model is not only encoder, but OWSM full model
+        if freeze:
+            for param in self.model.parameters():
+                param.requires_grad = False
+        
+        self.connector_choice = connector_choice
+        self.connector_idim = self.model.encoder.output_size()
+
+    def forward_encoder(self, feat_list: list):
+        feats = torch.stack(feat_list, dim=0)
+        feats_lengths = torch.tensor([feat.size(0) for feat in feat_list])
+        feats, feats_lengths = self.model.encode(feats, feats_lengths)
+
         return feats
