@@ -6,9 +6,13 @@
 
 """Positional Encoding Module."""
 
+import logging
 import math
 
 import torch
+from packaging.version import parse as V
+
+from espnet2.asr.frontend.cnn import dim_1_layer_norm
 
 
 def _pre_hook(
@@ -62,20 +66,20 @@ class PositionalEncoding(torch.nn.Module):
                 if self.pe.dtype != x.dtype or self.pe.device != x.device:
                     self.pe = self.pe.to(dtype=x.dtype, device=x.device)
                 return
-        pe = torch.zeros(x.size(1), self.d_model)
+        pe = torch.zeros(x.size(1), self.d_model) # [time, d_model]
         if self.reverse:
             position = torch.arange(
                 x.size(1) - 1, -1, -1.0, dtype=torch.float32
             ).unsqueeze(1)
         else:
-            position = torch.arange(0, x.size(1), dtype=torch.float32).unsqueeze(1)
+            position = torch.arange(0, x.size(1), dtype=torch.float32).unsqueeze(1) # [time, 1]
         div_term = torch.exp(
             torch.arange(0, self.d_model, 2, dtype=torch.float32)
             * -(math.log(10000.0) / self.d_model)
-        )
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
+        ) # [d_model/2]
+        pe[:, 0::2] = torch.sin(position * div_term) # [time, d_model/2]
+        pe[:, 1::2] = torch.cos(position * div_term) # [time, d_model/2]
+        pe = pe.unsqueeze(0) # [1, time, d_model]
         self.pe = pe.to(device=x.device, dtype=x.dtype)
 
     def forward(self, x: torch.Tensor):
@@ -387,6 +391,7 @@ class StreamPositionalEncoding(torch.nn.Module):
 
 class ConvolutionalPositionalEmbedding(torch.nn.Module):
     """Convolutional positional embedding.
+
        Used in wav2vec2/HuBERT SSL models.
        https://arxiv.org/abs/1904.11660
 
@@ -394,8 +399,12 @@ class ConvolutionalPositionalEmbedding(torch.nn.Module):
         embed_dim (int): Feature dimension of the input Tensor.
         dropout (float): unused
         max_len (int): unused
+        num_layers (int): number of conv layers
         kernel_size (int): The number of frames to be use.
         groups (int): The number of groups in feature dimensions.
+        weight_norm (str): [new, legacy, none].
+            How to init conv weights. Recommended setting is
+            none if num_layers > 1.
     """
 
     def __init__(
@@ -403,25 +412,55 @@ class ConvolutionalPositionalEmbedding(torch.nn.Module):
         embed_dim: int,
         dropout: float,
         max_len: int = 5000,
+        num_layers: int = 1,
         kernel_size: int = 128,
         groups: int = 16,
+        weight_norm: str = "new",
+        use_residual: bool = False,
     ):
+        """Initialize Convoluational Positional Embedding."""
         super().__init__()
         self.embed_dim = embed_dim
         self.kernel_size = kernel_size
-        self.conv = torch.nn.Conv1d(
-            in_channels=embed_dim,
-            out_channels=embed_dim,
-            kernel_size=kernel_size,
-            padding=kernel_size // 2,
-            groups=groups,
-        )
+        self.weight_norm = weight_norm
 
-        self.conv = torch.nn.utils.weight_norm(self.conv, name="weight", dim=2)
-        self.dropout = torch.nn.Dropout(p=dropout)
+        convs = []
+        for layer in range(num_layers):
+            conv = torch.nn.Conv1d(
+                in_channels=embed_dim,
+                out_channels=embed_dim,
+                kernel_size=kernel_size,
+                padding=kernel_size // 2,
+                groups=groups,
+            )
+            if weight_norm != "none" and weight_norm is not None:
+                std = math.sqrt((4 * (1.0)) / (kernel_size * embed_dim))
+                torch.nn.init.normal_(conv.weight, mean=0, std=std)
+                torch.nn.init.constant_(conv.bias, 0)
+                # torch.nn.utils.weight_norm leads to weird behavior
+                # with copy.deepcopy(). Usually isnt needed,
+                # but its important for models that use EMA
+                if weight_norm == "new":
+                    if V(torch.__version__) >= V("2.2.0"):
+                        conv = torch.nn.utils.parametrizations.weight_norm(
+                            conv, name="weight", dim=2
+                        )
+                    else:
+                        weight_norm = "legacy"
+                        logging.warning(
+                            "torch.nn.utils.parametrizations.weight_norm is only "
+                            + "supported for pytorch versions >= 2.2.0. "
+                            + "Defaulting to torch.nn.utils.weight_norm."
+                        )
+                if weight_norm == "legacy":
+                    conv = torch.nn.utils.weight_norm(conv, name="weight", dim=2)
+            convs.append(conv)
+        self.convs = torch.nn.ModuleList(convs)
         self.num_remove: int = 1 if kernel_size % 2 == 0 else 0
+        self.use_residual = use_residual
 
     def __prepare_scriptable__(self):
+        """Prepare Scriptable method."""
         for hook in self.conv._forward_pre_hooks.values():
             # The hook we want to remove is an instance of WeightNorm class, so
             # normally we would do `if isinstance(...)` but this class is not accessible
@@ -431,23 +470,155 @@ class ConvolutionalPositionalEmbedding(torch.nn.Module):
                 hook.__module__ == "torch.nn.utils.weight_norm"
                 and hook.__class__.__name__ == "WeightNorm"
             ):
-                _LG.warning("Removing weight_norm from %s", self.__class__.__name__)
+                logging.warning("Removing weight_norm from %s", self.__class__.__name__)
                 torch.nn.utils.remove_weight_norm(self.conv)
         return self
 
     def forward(self, x):
-        """
+        """Forward Method.
+
         Args:
             x (Tensor): shape ``[batch, frame, feature]``.
 
         Returns:
             Tensor: The resulting feature. Shape ``[batch, frame, feature]``.
         """
+        if self.use_residual:
+            residual = x
+
         x = x.transpose(-2, -1)
-        x = self.conv(x)
-        if self.num_remove > 0:
-            x = x[..., : -self.num_remove]
-        x = torch.nn.functional.gelu(x)
+        for conv in self.convs:
+            x = conv(x)
+
+            # remove extra padding
+            if self.num_remove > 0:
+                x = x[..., : -self.num_remove]
+
+            x = torch.nn.functional.gelu(x)
+
+            # manually normalize if the conv is not parameterized
+            # with weight norm
+            if self.weight_norm is None or self.weight_norm == "none":
+                x = dim_1_layer_norm(x)
+
         x = x.transpose(-2, -1)
-        x = self.dropout(x)
+
+        if self.use_residual:
+            x = x + residual
         return x
+
+
+class PositionalEncodingRoPE(torch.nn.Module):
+    """Rotary Position Embedding (RoPE) implementation.
+    
+    RoPE applies rotary transformations to query and key vectors based on their positions,
+    enabling the model to understand relative positions better.
+    
+    Args:
+        d_model (int): Embedding dimension.
+        dropout_rate (float): Dropout rate.
+        n_head (int): Number of attention heads.
+        max_len (int): Maximum input length.
+        base (float): Base for computing rotation frequencies.
+    """
+
+    def __init__(
+        self, 
+        d_model: int,
+        dropout_rate: float,
+        n_head: int, 
+        max_len: int = 5000,
+        base: float = 10000.0,
+    ):
+        """Initialize RoPE positional encoding."""
+        super().__init__()
+        self.d_model = d_model
+        self.n_head = n_head
+        self.base = base
+        self.max_len = max_len
+
+        self.dropout = torch.nn.Dropout(p=dropout_rate)
+        self.xscale = math.sqrt(self.d_model)
+        
+        # Pre-compute rotation frequencies
+        self._precompute_freqs_cis()
+
+    def _precompute_freqs_cis(self):
+        """Initialize rotation frequencies for RoPE."""
+
+        # Create frequency tensor for rotary embeddings
+        dim = self.d_model // self.n_head
+        # [0, 2, 4, ..., dim-2], dim // 2 indices in total
+        # freq = 1.0 / (base^(2i/d_model)) for i in range(d_model//2)
+        # Note: 1.0 / (base^(2i/d_model)) == base^(-2i/d_model)
+        freq = (1.0 / (self.base ** (torch.arange(0, dim, 2, dtype=torch.float32)[: (dim // 2)] / dim)))
+        t = torch.arange(self.max_len, device=freq.device)
+        freqs = torch.outer(t, freq).float() # [max_len, dim//2]
+        freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
+        self.register_buffer('freqs_cis', freqs_cis, persistent=False)
+
+    def _extend_freqs_cis(self, new_max_len: int):
+        """Extend the precomputed frequency table to accommodate longer sequences."""
+        if new_max_len <= self.freqs_cis.size(0):
+            return
+
+        # Create frequency tensor for the extended length
+        dim = self.d_model // self.n_head
+        freq = (1.0 / (self.base ** (torch.arange(0, dim, 2, dtype=torch.float32)[: (dim // 2)] / dim)))
+
+        # Create extended time indices starting from the current max length
+        device = self.freqs_cis.device
+        dtype = self.freqs_cis.dtype
+        t_extended = torch.arange(self.freqs_cis.size(0), new_max_len, device=device)
+        freq = freq.to(device=device, dtype=dtype)
+
+        # Compute new frequencies for the extended part
+        freqs_extended = torch.outer(t_extended, freq).float()
+        freqs_cis_extended = torch.polar(torch.ones_like(freqs_extended), freqs_extended)
+
+        # Concatenate with existing frequencies
+        self.freqs_cis = torch.cat([self.freqs_cis, freqs_cis_extended], dim=0)
+
+    def apply_rope(self, x: torch.Tensor, pos_offset: int = 0) -> torch.Tensor:
+        """Apply RoPE to input tensor.
+
+        Args:
+            x: Input tensor [batch * n_head, seq_len, d_model // n_head]
+            pos_offset: Position offset for incremental generation
+
+        Returns:
+            Rotated tensor [batch * n_head, seq_len, d_model // n_head]
+        """
+
+        batch_size, seq_len, d_model = x.shape
+        x_ = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2)) # [batch, seq_len, d_model//2]
+
+        # Dynamically extend freqs_cis if needed
+        required_len = pos_offset + x.size(1)
+        if required_len > self.freqs_cis.size(0):
+            logging.info(f"RoPE: Extending freqs_cis from {self.freqs_cis.size(0)} to {required_len}")
+            self._extend_freqs_cis(required_len)
+
+        freqs_cis = self.freqs_cis[pos_offset:pos_offset + x.size(1)].unsqueeze(0) # [1, seq_len, d_model//2]
+        x_out = torch.view_as_real(x_ * freqs_cis).reshape(batch_size, seq_len, d_model)
+        return x_out.type_as(x)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass - for compatibility with PositionalEncoding interface.
+        
+        Note: RoPE is typically applied within attention mechanism,
+        but we provide this for interface compatibility.
+        
+        Args:
+            x: Input tensor [batch, seq_len, d_model]
+            
+        Returns:
+            Output tensor [batch, seq_len, d_model]
+        """
+        # Multiply by sqrt(d_model) to maintain consistency with other embeddings,
+        # then apply dropout. This follows the original Transformer paper's approach
+        # and helps maintain numerical stability.
+        # No positional encoding is added here since positions are directly applied 
+        # to query and key later in the MultiHeadedAttentionRoPE.
+        return self.dropout(x * self.xscale)
