@@ -1,0 +1,1 @@
+. /work/nvme/bbjs/qwang20/espnet_speechlm3_jinchuan/tools/kaldi/tools/env.sh

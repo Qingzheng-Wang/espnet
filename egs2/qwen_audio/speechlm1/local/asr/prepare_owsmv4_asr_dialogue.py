@@ -1,0 +1,105 @@
+from pathlib import Path
+import random
+import argparse
+import json
+import os
+from tqdm import tqdm
+from espnet2.speechlm.dialogue.dialogue_format import Dialogue, DialogueDataset
+
+def get_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--data_dir", 
+        type=Path,
+        default="data",
+        help="The data dir that train, dev, test is in"
+    )
+    parser.add_argument(
+        "--dump_dir",
+        type=Path,
+        default="dump",
+        help="Dump dir for dialogue data"
+    )
+    parser.add_argument(
+        "--dump_audio_dir", 
+        type=Path, 
+        default="dump_audio",
+        help="In the sh file, we first dump audio to the dump_audio_dir in flac.ark format"
+    ) # when generating dialogue data, we use the dumped flac.ark audio path
+    parser.add_argument(
+        "--dump_kaldi_dir",
+        type=Path,
+        default="dump_kaldi",
+        help="Dump dir for kaldi data"
+    )
+    parser.add_argument(
+        "--split",
+        type=str, # a default value should be like datasetname_split
+        help="The corresponding train, dev, test name of the dataset"
+    )
+    parser.add_argument(
+        "--prompt_json",
+        type=str,
+        help="The name of the prompt json file" # like asr_prompt.json
+    )
+
+    return parser
+
+def read_prompt_json(prompt_json_dir):
+    with open(prompt_json_dir, "r") as f:
+        prompt_json = json.load(f)
+    
+    prompt_list = []
+    for key, value in prompt_json.items():
+        prompt_list.extend(value)
+    
+    return prompt_list
+
+def main():
+    parser = get_parser()
+    args = parser.parse_args()
+
+    data_dir = args.data_dir
+    dump_dir = args.dump_dir
+    dump_audio_dir = args.dump_audio_dir
+    dump_kaldi_dir = args.dump_kaldi_dir
+    split = args.split
+    prompt_json = args.prompt_json
+
+    prompt_json_dir = data_dir / "prompts" / prompt_json
+    prompt_list = read_prompt_json(prompt_json_dir)
+
+    total_lines = os.system(f"wc -l {dump_kaldi_dir / split / 'text.ctc'}")
+
+    with (
+        open(dump_kaldi_dir / split / "text.ctc", "r") as text_ctc_file,
+        open(dump_audio_dir / f"audio_raw_audio_text_dialogue_{split}" / "wav.scp", "r") as dump_audio_file,
+    ):
+
+        dataset = DialogueDataset(task="audio_text_dialogue")
+        
+        for line_text_ctc, line_dump_audio in tqdm(zip(text_ctc_file, dump_audio_file), total=total_lines):
+            uttid_text_ctc, text_ctc = line_text_ctc.strip().split(" ", 1)
+            uttid, wav_path = line_dump_audio.strip().split(" ", 1)
+            assert uttid_text_ctc == uttid, f"uttid and uttid_text_ctc are not the same: {uttid} {uttid_text_ctc}"
+
+            if "_st_" in uttid:
+                continue
+
+            if "_en_asr" in uttid:
+                # Currently, only use english data
+
+                dialogue = Dialogue(task="audio_text_dialogue")
+                assistant_text = f"{text_ctc}"
+                
+                dialogue.add_segment("user", "speech_owsm_encoder", False, wav_path)
+                dialogue.add_segment("user", "text_bpe", False, random.choice(prompt_list))
+                dialogue.add_segment("assistant", "text_bpe", True, assistant_text)
+                dataset.add_dialogue(uttid, dialogue)
+
+    dump_dialogue_dir = dump_dir / f"raw_audio_text_dialogue_{split}_en_asr"
+    dump_dialogue_dir.mkdir(parents=True, exist_ok=True)
+    dataset.dump_dataset(dump_dialogue_dir)
+
+if __name__ == "__main__":
+    main()

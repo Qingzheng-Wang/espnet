@@ -1,0 +1,1 @@
+dump_kaldi里面存filter过长度的utt对应的kaldi file，python文件的处理应该在dump_kaldi对应的file上，而不是data下面的file上
