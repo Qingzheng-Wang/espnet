@@ -140,7 +140,10 @@ def main():
                 clean_text = clean_timestamp(text)
                 
                 lang_target = task.replace("st_", "")
-                if lang_target not in support_lang:
+                # if both lang_target and lang_origin are not in support_lang, skip
+                # because, the smollm3 does not corresponding language's knowledge
+                # so the translation cannot be done
+                if lang_target not in support_lang and lang_origin not in support_lang:
                     continue
 
                 lang_target_name = iso639.Language.from_part3(lang_target).name

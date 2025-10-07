@@ -73,12 +73,12 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
             --split ${split} \
             --prompt_json asr_prompt.json \
         
-        cp ${dumpdir}/raw_audio_text_dialogue_${split}_en_asr/data/dialogue.1 ${dumpdir}/raw_audio_text_dialogue_${split}_en_asr/dialogue
+        cp ${dumpdir}/raw_audio_text_dialogue_${split}_asr/data/dialogue.1 ${dumpdir}/raw_audio_text_dialogue_${split}_asr/dialogue
 
         python pyscripts/utils/make_speechlm_json.py \
-            --output_json ${dumpdir}/raw_audio_text_dialogue_${split}_en_asr/data.json \
+            --output_json ${dumpdir}/raw_audio_text_dialogue_${split}_asr/data.json \
             --task audio_text_dialogue \
-            --file_modality_type ${dumpdir}/raw_audio_text_dialogue_${split}_en_asr/dialogue,dialogue,dialogue_json \
+            --file_modality_type ${dumpdir}/raw_audio_text_dialogue_${split}_asr/dialogue,dialogue,dialogue_json \
             --token_list ${llm_token_list}
     done
 

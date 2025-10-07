@@ -3,6 +3,7 @@ import random
 import argparse
 import json
 import os
+import re
 from tqdm import tqdm
 from espnet2.speechlm.dialogue.dialogue_format import Dialogue, DialogueDataset
 
@@ -69,25 +70,44 @@ def main():
     prompt_json_dir = data_dir / "prompts" / prompt_json
     prompt_list = read_prompt_json(prompt_json_dir)
 
+    # Currently, first support the language smollm3 support
+    support_lang = [
+        "por", "ita", "deu", "spa", "fra", "eng", "zho", "ara", "rus"
+    ]
+
     total_lines = os.system(f"wc -l {dump_kaldi_dir / split / 'text.ctc'}")
 
     with (
         open(dump_kaldi_dir / split / "text.ctc", "r") as text_ctc_file,
+        open(dump_kaldi_dir / split / "text", "r") as text_file,
         open(dump_audio_dir / f"audio_raw_audio_text_dialogue_{split}" / "wav.scp", "r") as dump_audio_file,
     ):
 
         dataset = DialogueDataset(task="audio_text_dialogue")
         
-        for line_text_ctc, line_dump_audio in tqdm(zip(text_ctc_file, dump_audio_file), total=total_lines):
+        for line_text_ctc, line_text, line_dump_audio in tqdm(zip(text_ctc_file, text_file, dump_audio_file), total=total_lines):
             uttid_text_ctc, text_ctc = line_text_ctc.strip().split(" ", 1)
+            uttid_text, text = line_text.strip().split(" ", 1)
             uttid, wav_path = line_dump_audio.strip().split(" ", 1)
-            assert uttid_text_ctc == uttid, f"uttid and uttid_text_ctc are not the same: {uttid} {uttid_text_ctc}"
+            assert uttid_text_ctc == uttid and uttid_text == uttid, f"uttid and uttid_text_ctc are not the same: {uttid} {uttid_text_ctc} {uttid_text}"
 
-            if "_st_" in uttid:
-                continue
+            # text is like <task><lang><0.00> dddd
+            # parse the text to get the task, lang, and text
+            pattern = r'<([^>]+)><([^>]+)><([^>]+)>\s*(.*)'
+            match = re.match(pattern, text)
+            if match:
+                lang, task, timestamp, actual_text = match.groups()
+                # task: the task type
+                # lang: the language code  
+                # timestamp: the timestamp (like 0.00)
+                # actual_text: the remaining text content
+            else:
+                # fallback if pattern doesn't match
+                lang, task, timestamp, actual_text = None, None, None, text
 
-            if "_en_asr" in uttid:
-                # Currently, only use english data
+            assert lang is not None, f"lang is None: {uttid} {text}"
+
+            if lang in support_lang:
 
                 dialogue = Dialogue(task="audio_text_dialogue")
                 assistant_text = f"{text_ctc}"
@@ -97,7 +117,7 @@ def main():
                 dialogue.add_segment("assistant", "text_bpe", True, assistant_text)
                 dataset.add_dialogue(uttid, dialogue)
 
-    dump_dialogue_dir = dump_dir / f"raw_audio_text_dialogue_{split}_en_asr"
+    dump_dialogue_dir = dump_dir / f"raw_audio_text_dialogue_{split}_asr"
     dump_dialogue_dir.mkdir(parents=True, exist_ok=True)
     dataset.dump_dataset(dump_dialogue_dir)
 
