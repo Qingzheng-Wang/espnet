@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import iso639
 from tqdm import tqdm
 from espnet2.speechlm.dialogue.dialogue_format import Dialogue, DialogueDataset
 
@@ -115,7 +116,7 @@ def main():
             uttid_text_ctc, text_ctc = line_text_ctc.strip().split(" ", 1)
             uttid_text, text = line_text.strip().split(" ", 1)
             uttid, wav_path = line_dump_audio.strip().split(" ", 1)
-            assert uttid_text_ctc == uttid, f"uttid and uttid_text_ctc are not the same: {uttid} {uttid_text_ctc}"
+            assert uttid_text_ctc == uttid and uttid_text == uttid, f"uttid and uttid_text_ctc are not the same: {uttid} {uttid_text_ctc} {uttid_text}"
 
             # text is like <task><lang><0.00> dddd
             # parse the text to get the task, lang, and text
@@ -133,7 +134,7 @@ def main():
             
             assert lang_origin is not None, f"lang_origin is None: {uttid} {text}"
 
-            lang_origin = lang_origin.replace("<", "").replace(">", "")
+            lang_origin_name = iso639.Language.from_part3(lang_origin).name
 
             if "st" in task:
                 clean_text = clean_timestamp(text)
@@ -142,17 +143,19 @@ def main():
                 if lang_target not in support_lang:
                     continue
 
+                lang_target_name = iso639.Language.from_part3(lang_target).name
+
                 dialogue = Dialogue(task="audio_text_dialogue")
                 assistant_text = f"{clean_text}"
 
                 if random.random() < 0.5:
                     prompt_list = prompt_list_without_source_lang
                     prompt_template = random.choice(prompt_list)
-                    prompt = prompt_template.format(target_lang=lang_target)
+                    prompt = prompt_template.format(target_lang=lang_target_name)
                 else:
                     prompt_list = prompt_list_with_source_lang
                     prompt_template = random.choice(prompt_list)
-                    prompt = prompt_template.format(source_lang=lang_origin, target_lang=lang_target)
+                    prompt = prompt_template.format(source_lang=lang_origin_name, target_lang=lang_target_name)
                 
                 dialogue.add_segment("user", "speech_owsm_encoder", False, wav_path)
                 dialogue.add_segment("user", "text_bpe", False, prompt)
