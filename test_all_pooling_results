@@ -1,0 +1,242 @@
+
+======================================================================
+COMPREHENSIVE POOLING COMPARISON TEST SUITE
+======================================================================
+
+======================================================================
+TESTING MeanPooling
+======================================================================
+
+============================================================
+MeanPooling - Test 1: Basic (no feat_lengths)
+  batch_size=2, feature_dim=128, seq_len=50
+============================================================
+✓ MeanPooling - Test 1: Basic (no feat_lengths) - Output: PASSED (max diff: 0.00e+00)
+
+============================================================
+MeanPooling - Test 2: With feat_lengths (no padding)
+  batch_size=2, feature_dim=128, seq_len=50
+  feat_lengths=[50, 50]
+============================================================
+✓ MeanPooling - Test 2: With feat_lengths (no padding) - Output: PASSED (max diff: 0.00e+00)
+
+============================================================
+MeanPooling - Test 3: With feat_lengths (with padding)
+  batch_size=3, feature_dim=128, seq_len=100
+  feat_lengths=[80, 60, 100]
+============================================================
+✓ MeanPooling - Test 3: With feat_lengths (with padding) - Output: PASSED (max diff: 4.47e-08)
+
+============================================================
+MeanPooling - Test 4: Large batch size
+  batch_size=8, feature_dim=256, seq_len=75
+  feat_lengths=[75, 70, 65, 60, 55, 50, 45, 75]
+============================================================
+✓ MeanPooling - Test 4: Large batch size - Output: PASSED (max diff: 8.94e-08)
+
+============================================================
+MeanPooling - Test 5: Different feature dimensions (512)
+  batch_size=4, feature_dim=512, seq_len=30
+  feat_lengths=[30, 25, 20, 15]
+============================================================
+✓ MeanPooling - Test 5: Different feature dimensions (512) - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+MeanPooling - Test 6: Very short sequences
+  batch_size=2, feature_dim=128, seq_len=10
+  feat_lengths=[8, 10]
+============================================================
+✓ MeanPooling - Test 6: Very short sequences - Output: PASSED (max diff: 0.00e+00)
+
+============================================================
+MeanPooling - Test 7: Single sample
+  batch_size=1, feature_dim=128, seq_len=50
+  feat_lengths=[40]
+============================================================
+✓ MeanPooling - Test 7: Single sample - Output: PASSED (max diff: 0.00e+00)
+
+============================================================
+MeanPooling - Test 8: Default feature dimension (1536)
+  batch_size=2, feature_dim=1536, seq_len=50
+  feat_lengths=[45, 50]
+============================================================
+✓ MeanPooling - Test 8: Default feature dimension (1536) - Output: PASSED (max diff: 5.96e-08)
+
+============================================================
+MeanPooling - Test 9: Very small feat_lengths
+  batch_size=3, feature_dim=128, seq_len=100
+  feat_lengths=[5, 10, 15]
+============================================================
+✓ MeanPooling - Test 9: Very small feat_lengths - Output: PASSED (max diff: 1.79e-07)
+
+============================================================
+MeanPooling - Test 10: Edge case (feat_length = 1)
+  batch_size=2, feature_dim=128, seq_len=50
+  feat_lengths=[1, 2]
+============================================================
+✓ MeanPooling - Test 10: Edge case (feat_length = 1) - Output: PASSED (max diff: 0.00e+00)
+
+MeanPooling Summary: 10/10 tests passed
+
+======================================================================
+TESTING StatsPooling
+======================================================================
+
+============================================================
+StatsPooling - Test 1: Basic (no feat_lengths)
+  batch_size=2, feature_dim=128, seq_len=50
+============================================================
+✓ StatsPooling - Test 1: Basic (no feat_lengths) - Output: PASSED (max diff: 0.00e+00)
+
+============================================================
+StatsPooling - Test 2: With feat_lengths (no padding)
+  batch_size=2, feature_dim=128, seq_len=50
+  feat_lengths=[50, 50]
+============================================================
+✓ StatsPooling - Test 2: With feat_lengths (no padding) - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+StatsPooling - Test 3: With feat_lengths (with padding)
+  batch_size=3, feature_dim=128, seq_len=100
+  feat_lengths=[80, 60, 100]
+============================================================
+✓ StatsPooling - Test 3: With feat_lengths (with padding) - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+StatsPooling - Test 4: Large batch size
+  batch_size=8, feature_dim=256, seq_len=75
+  feat_lengths=[75, 70, 65, 60, 55, 50, 45, 75]
+============================================================
+✓ StatsPooling - Test 4: Large batch size - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+StatsPooling - Test 5: Different feature dimensions (512)
+  batch_size=4, feature_dim=512, seq_len=30
+  feat_lengths=[30, 25, 20, 15]
+============================================================
+✓ StatsPooling - Test 5: Different feature dimensions (512) - Output: PASSED (max diff: 1.79e-07)
+
+============================================================
+StatsPooling - Test 6: Very short sequences
+  batch_size=2, feature_dim=128, seq_len=10
+  feat_lengths=[8, 10]
+============================================================
+✓ StatsPooling - Test 6: Very short sequences - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+StatsPooling - Test 7: Single sample
+  batch_size=1, feature_dim=128, seq_len=50
+  feat_lengths=[40]
+============================================================
+✓ StatsPooling - Test 7: Single sample - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+StatsPooling - Test 8: Default feature dimension (1536)
+  batch_size=2, feature_dim=1536, seq_len=50
+  feat_lengths=[45, 50]
+============================================================
+✓ StatsPooling - Test 8: Default feature dimension (1536) - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+StatsPooling - Test 9: Very small feat_lengths
+  batch_size=3, feature_dim=128, seq_len=100
+  feat_lengths=[5, 10, 15]
+============================================================
+✓ StatsPooling - Test 9: Very small feat_lengths - Output: PASSED (max diff: 1.79e-07)
+
+============================================================
+StatsPooling - Test 10: Edge case (feat_length = 1)
+  batch_size=2, feature_dim=128, seq_len=50
+  feat_lengths=[1, 2]
+============================================================
+✓ StatsPooling - Test 10: Edge case (feat_length = 1) - Output: PASSED (max diff: 1.19e-07)
+
+StatsPooling Summary: 10/10 tests passed
+
+======================================================================
+TESTING ChnAttnStatPooling
+======================================================================
+
+============================================================
+ChnAttnStatPooling - Test 1: Basic (no feat_lengths)
+  batch_size=2, feature_dim=128, seq_len=50
+============================================================
+✓ ChnAttnStatPooling - Test 1: Basic (no feat_lengths) - Output: PASSED (max diff: 0.00e+00)
+
+============================================================
+ChnAttnStatPooling - Test 2: With feat_lengths (no padding)
+  batch_size=2, feature_dim=128, seq_len=50
+  feat_lengths=[50, 50]
+============================================================
+✓ ChnAttnStatPooling - Test 2: With feat_lengths (no padding) - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+ChnAttnStatPooling - Test 3: With feat_lengths (with padding)
+  batch_size=3, feature_dim=128, seq_len=100
+  feat_lengths=[80, 60, 100]
+============================================================
+✓ ChnAttnStatPooling - Test 3: With feat_lengths (with padding) - Output: PASSED (max diff: 2.38e-07)
+
+============================================================
+ChnAttnStatPooling - Test 4: Large batch size
+  batch_size=8, feature_dim=256, seq_len=75
+  feat_lengths=[75, 70, 65, 60, 55, 50, 45, 75]
+============================================================
+✓ ChnAttnStatPooling - Test 4: Large batch size - Output: PASSED (max diff: 2.38e-07)
+
+============================================================
+ChnAttnStatPooling - Test 5: Different feature dimensions (512)
+  batch_size=4, feature_dim=512, seq_len=30
+  feat_lengths=[30, 25, 20, 15]
+============================================================
+✓ ChnAttnStatPooling - Test 5: Different feature dimensions (512) - Output: PASSED (max diff: 2.38e-07)
+
+============================================================
+ChnAttnStatPooling - Test 6: Very short sequences
+  batch_size=2, feature_dim=128, seq_len=10
+  feat_lengths=[8, 10]
+============================================================
+✓ ChnAttnStatPooling - Test 6: Very short sequences - Output: PASSED (max diff: 2.38e-07)
+
+============================================================
+ChnAttnStatPooling - Test 7: Single sample
+  batch_size=1, feature_dim=128, seq_len=50
+  feat_lengths=[40]
+============================================================
+✓ ChnAttnStatPooling - Test 7: Single sample - Output: PASSED (max diff: 1.19e-07)
+
+============================================================
+ChnAttnStatPooling - Test 8: Default feature dimension (1536)
+  batch_size=2, feature_dim=1536, seq_len=50
+  feat_lengths=[45, 50]
+============================================================
+✓ ChnAttnStatPooling - Test 8: Default feature dimension (1536) - Output: PASSED (max diff: 2.38e-07)
+
+============================================================
+ChnAttnStatPooling - Test 9: Very small feat_lengths
+  batch_size=3, feature_dim=128, seq_len=100
+  feat_lengths=[5, 10, 15]
+============================================================
+✓ ChnAttnStatPooling - Test 9: Very small feat_lengths - Output: PASSED (max diff: 1.79e-07)
+
+============================================================
+ChnAttnStatPooling - Test 10: Edge case (feat_length = 1)
+  batch_size=2, feature_dim=128, seq_len=50
+  feat_lengths=[1, 2]
+============================================================
+✓ ChnAttnStatPooling - Test 10: Edge case (feat_length = 1) - Output: PASSED (max diff: 1.26e-06)
+
+ChnAttnStatPooling Summary: 10/10 tests passed
+
+======================================================================
+FINAL TEST SUMMARY
+======================================================================
+MeanPooling              : 10/10 tests ✓ PASS
+StatsPooling             : 10/10 tests ✓ PASS
+ChnAttnStatPooling       : 10/10 tests ✓ PASS
+
+======================================================================
+Overall: 30/30 tests passed
+
+✓ ALL TESTS PASSED!
+======================================================================
