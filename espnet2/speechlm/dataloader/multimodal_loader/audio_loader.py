@@ -1,8 +1,29 @@
 #!/usr/bin/env python3
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
+"""Audio data loading utilities using Lhotse library for efficient audio processing."""
+
 from pathlib import Path
 from typing import Tuple
+from typing import Optional
 
 import numpy as np
+import pandas as pd
+
+try:
+    from arkive import audio_read
+except ImportError:
+    raise ImportError(
+        "arkive is not installed. Please install at https://github.com/wanchichen/arkive"
+    )
+
+try:
+    import duckdb
+except ImportError:
+    raise ImportError(
+        "duckdb is not installed. Please install it with: pip install duckdb"
+    )
 
 try:
     from lhotse import CutSet, RecordingSet
@@ -10,6 +31,106 @@ except ImportError:
     raise ImportError(
         "lhotse is not installed. Please install it with: pip install lhotse"
     )
+
+
+class ArkiveAudioReader:
+    """Dict-like lazy audio reader using arkive parquets
+
+    Args:
+        manifest_dir: Directory containing the arkive manifest files
+            e.g. /path/to/dataset/audio1
+        valid_ids: List of valid IDs to keep (optional, keeps all if None)
+        worker_id: partition ids by worker (optional, keeps all if None)
+        world_size: used for worker partitioning
+        query: (optional) SQL query for advanced usage
+            columns: [utt_id, path, start_byte_offset, file_size_bytes, start_time, end_time]
+    """
+
+    def __init__(
+        self,
+        manifest_dir: str,
+        valid_ids: list = None,
+        worker_id: int = None,
+        world_size: int = None,
+        query: Optional[str] = None,
+    ):
+
+        if query is None:
+            query = f"SELECT * FROM '{manifest_dir}/metadata.parquet'"
+
+        result = duckdb.query(query)
+
+        # filter query result before loading to df
+        # avoids loading the whole query result into memory
+        if worker_id is not None:
+            assert (
+                world_size is not None
+            ), f"filtering by worker_id requires world_size, got {world_size}"
+            result = duckdb.query(
+                f"""
+                SELECT * FROM result
+                QUALIFY (row_number() OVER (ORDER BY utt_id) - 1) % {world_size} = {worker_id}
+            """
+            )
+
+        df = result.df()
+
+        data = dict(
+            zip(
+                df["utt_id"],
+                zip(
+                    df["path"],
+                    df["start_byte_offset"],
+                    df["file_size_bytes"],
+                    df["start_time"],
+                    df["end_time"],
+                ),
+            )
+        )
+
+        if valid_ids:
+            data = {k: data[k] for k in set(valid_ids) if k in data}
+
+        self.data = data
+
+    def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
+        path, start_byte, file_size, start_time, end_time = self.data[key]
+        
+        # Convert pandas NA to Python None
+        if pd.isna(start_time):
+            start_time = None
+        if pd.isna(end_time):
+            end_time = None
+        
+        data = audio_read(
+            path,
+            start_offset=start_byte,
+            file_size=file_size,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+        return data.array.T, data.sample_rate
+
+    def __contains__(self, key: str) -> bool:
+        """Check if ID exists in manifest."""
+        return key in self.data
+
+    def __len__(self) -> int:
+        """Return number of items in manifest."""
+        return len(self.data)
+
+    def keys(self):
+        """Return iterator over IDs."""
+        return self.data.keys()
+
+    def values(self):
+        """Return iterator over items."""
+        return self.data.values()
+
+    def items(self):
+        """Return iterator over (id, item) pairs."""
+        return self.data.items()
 
 
 class LhotseAudioReader:

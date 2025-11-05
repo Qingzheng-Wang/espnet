@@ -1,0 +1,61 @@
+# SpeechLM Training Configuration for LibriSpeech ASR
+# This config trains a speech language model for automatic speech recognition
+
+# Job type
+job_type: speechlm
+
+# Multimodal IO configuration
+multimodal_io:
+  # Discrete audio tokenizer (for output/generation)
+  # discrete_audio:
+  #   ssl_choice: "ESPnet"
+  #   ssl_hf_model_tag: "espnet/xeus"  # HuBERT-based SSL model
+  #   codec_choice: null  # Disable codec, only use SSL
+  #   codec_hf_model_tag: none
+  #   codec_max_token_per_frame: 8
+  #   stream_weights: null  # Equal weights for all streams
+  #   delay_interleave: false
+  #   device: "cuda"
+
+  continuous_audio:
+    encoder_choice: "huggingface"
+    encoder_hf_model_tag: "Qwen/Qwen2.5-Omni-7B"
+    attn_implementation: "flash_attention_2"
+    dtype: "bfloat16"
+    device: "cuda"
+
+  # Text tokenizer
+  text:
+    tokenizer_name: "Qwen/Qwen2.5-0.5B"
+
+# Language model configuration
+model:
+  model_choice: "parallel"
+  model_hf_tag: "Qwen/Qwen2.5-0.5B"
+  model_conf:
+    torch_dtype: "bfloat16"
+    attn_implementation: "flash_attention_2"  # Requires flash-attn package
+  activation_checkpointing: false  # Set to true for large models
+
+# Preprocessor configuration
+preprocessor:
+  audio_input: "continuous_audio" # Use continuous audio for audio input
+  audio_output: "discrete_audio"  # Generate discrete audio tokens
+  loss_region: "assistant"        # Only compute loss on assistant responses
+
+# Data loading configuration
+data_loading:
+  batchfy_method: "bucket"    # or "bucket"
+  batch_size: 2000         # Total tokens per batch
+  num_workers: 2
+  seed: 42
+
+# Trainer configuration
+trainer:
+  max_step: 100000
+  log_interval: 100         # Log every 100 steps
+  val_interval: 5000        # Validate every 5000 steps
+  save_interval: 5000       # Save checkpoint every 5000 steps
+  deepspeed_config: "conf/deepspeed_zero2.json"
+  freeze_param: []          # Optional: freeze parameters like ["lm.model.layers.0"]
+
