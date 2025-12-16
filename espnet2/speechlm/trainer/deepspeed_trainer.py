@@ -5,6 +5,7 @@
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -13,8 +14,13 @@ import torch
 import torch.nn as nn
 import wandb
 import swanlab
+from deepspeed.moe.utils import split_params_into_different_moe_groups_for_optimizer
 
+from espnet2.speechlm.model.speechlm.moe_utils.replace_moe_layer import (
+    replace_qwen3_moe_layer,
+)
 from espnet2.speechlm.utils.data import to_device
+from espnet2.speechlm.utils.model_summary import model_summary
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +76,22 @@ class DeepSpeedTrainer:
                     logger.info(f"Setting {k}.requires_grad = False")
                     p.requires_grad = False
 
+        # Expert parallel (EP)
+        ep_size = trainer_args.get("ep_size", 1)
+        if ep_size > 1:
+            model, params = self.setup_expert_parallel(model, ep_size)
+        else:
+            params = [p for p in model.parameters() if p.requires_grad]
+
         # Initialization
-        ds_config_path = self.trainer_args["deepspeed_config"]
+        ds_config_path = trainer_args["deepspeed_config"]
         with open(ds_config_path, "r") as f:
             ds_config = json.load(f)
+
+        logger.info(model_summary(model))
         self.model_engine, _, _, _ = deepspeed.initialize(
             model=model,
+            model_parameters=params,
             config=ds_config,
         )
         logger.info("Successfully initialize DeepSpeed with configuration")
@@ -179,6 +195,8 @@ class DeepSpeedTrainer:
             length=self.save_interval,
         )
         for batch in iterator:
+            iter_start = time.time()
+
             batch = to_device(batch, "cuda", dtype=self.dtype)
             out = self.model_engine(**batch)
 
@@ -190,10 +208,8 @@ class DeepSpeedTrainer:
 
             stats = {f"train/{k}": float(v.cpu()) for k, v in stats.items()}
             stats["train/lr"] = self.model_engine.get_lr()[0]
-            
-            grad_norm = self.model_engine.get_global_grad_norm()
-            if grad_norm is not None:
-                stats["train/grad_norm"] = grad_norm
+            stats["train/grad_norm"] = self.model_engine.get_global_grad_norm()
+            stats["time/iter"] = time.time() - iter_start
 
             # Log to active experiment tracker
             if wandb.run is not None:
@@ -256,3 +272,21 @@ class DeepSpeedTrainer:
 
         logger.info(f"Convert all float input data to dtype={dtype}")
         return dtype
+
+    def setup_expert_parallel(self, model, ep_size):
+        from transformers import Qwen3MoeForCausalLM
+        from transformers.models.qwen3_moe.modeling_qwen3_moe import (
+            load_balancing_loss_func,
+        )
+
+        if isinstance(model, Qwen3MoeForCausalLM):
+            model = replace_qwen3_moe_layer(model, ep_size)
+            setattr(model, "load_balancing_loss_func", load_balancing_loss_func)
+        else:
+            raise NotImplementedError(f"No EP strategy support for {type(model)}")
+
+        params = [p for p in model.parameters() if p.requires_grad]
+        params = {"params": params, "name": "parameters"}
+        params = split_params_into_different_moe_groups_for_optimizer(params)
+
+        return model, params
