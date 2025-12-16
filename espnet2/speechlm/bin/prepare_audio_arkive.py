@@ -8,7 +8,7 @@ import argparse
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import pandas as pd
 
@@ -16,7 +16,7 @@ try:
     from arkive import Arkive
 except ImportError:
     raise ImportError(
-        "arkive is not installed. Please install at https://github.com/wanchichen/arkive"
+        "arkive is not installed. Install at https://github.com/wanchichen/arkive"
     )
 
 
@@ -95,8 +95,8 @@ def prepare_audio_arkive(
         format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s",
     )
 
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     logging.info(f"Reading wav.scp from: {wav_scp}")
     logging.info(f"Output directory: {output_dir}")
@@ -121,7 +121,7 @@ def prepare_audio_arkive(
     logging.info(f"Found {len(audio_paths)} recordings in wav.scp")
 
     paths = [audio_paths[recording_id] for recording_id in audio_paths]
-    ark = Arkive(str(output_dir))
+    ark = Arkive(output_dir)
     ark.append(paths)
 
     logging.info(
@@ -170,22 +170,7 @@ def prepare_audio_arkive(
         columns=["original_file_path", "utt_id", "doc_id", "start_time", "end_time"]
         + cols,
     )
-    
-    # Save processed parquet file with backup mechanism
-    parquet_path = output_dir / "metadata.parquet"
-    backup_dir = output_dir / ".backup"
-    
-    # Backup existing file if it exists
-    if parquet_path.exists():
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_file = backup_dir / "metadata.parquet"
-        logging.info(f"Backing up existing parquet to: {backup_file}")
-        if backup_file.exists():
-            backup_file.unlink()  # Remove old backup
-        parquet_path.rename(backup_file)
-    
-    logging.info(f"Saving new parquet to: {parquet_path}")
-    out_df.to_parquet(str(parquet_path))
+    out_df.to_parquet(f"{output_dir.rstrip(os.path.sep)}_processed.parquet")
 
 
 def get_parser():
@@ -204,7 +189,6 @@ def get_parser():
         "--segments",
         type=str,
         default=None,
-        required=False,
         help="Path to Kaldi segments file (optional)",
     )
     parser.add_argument(

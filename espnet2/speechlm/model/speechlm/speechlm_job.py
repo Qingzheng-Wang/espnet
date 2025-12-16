@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""SpeechLM job template for training configuration."""
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
+"""SpeechLM job template implementation for multimodal language modeling."""
 
 import re
 from typing import Any, Callable, Dict
@@ -401,4 +404,8 @@ class SpeechLMPreprocessor:
                 this_data = data_dict[entry]
                 message = (role, this_io, this_data)
                 messages.append(message)
+<<<<<<< HEAD
             return messages
+=======
+            return messages
+>>>>>>> jinchuan/pr1_revise_bin

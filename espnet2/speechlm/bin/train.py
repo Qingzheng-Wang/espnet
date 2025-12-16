@@ -6,19 +6,19 @@
 
 import argparse
 import logging
+import os
+import shutil
 import sys
 from pathlib import Path
 
 import deepspeed
 import torch
 import wandb
-import swanlab
 import yaml
 
 from espnet2.speechlm.dataloader.iterator import DataIteratorFactory
 from espnet2.speechlm.model import _all_job_types
 from espnet2.speechlm.trainer.deepspeed_trainer import DeepSpeedTrainer
-from espnet2.speechlm.utils.model_summary import model_summary
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -102,6 +102,12 @@ def get_parser() -> argparse.ArgumentParser:
         required=True,
         help="The folder of length statistics",
     )
+    data_group.add_argument(
+        "--save-loader-state",
+        action="store_true",
+        default=False,
+        help="Whether to save the loader state for resuming training",
+    )
 
     # Logging configuration
     log_group = parser.add_argument_group("Logging")
@@ -112,17 +118,21 @@ def get_parser() -> argparse.ArgumentParser:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level",
     )
-    log_group.add_argument(
-        "--logger-type",
-        type=str,
-        default="wandb",
-        choices=["wandb", "swanlab"],
-        help="Type of logger to use",
-    )
 
-    # Wandb configuration (mandatory local/offline logging)
-    wandb_group = parser.add_argument_group(
-        "Weights & Biases (Mandatory Local Logging)"
+    # Wandb configuration
+    wandb_group = parser.add_argument_group("Weights & Biases Configuration")
+    wandb_group.add_argument(
+        "--wandb-mode",
+        type=str,
+        default="online",
+        choices=["online", "offline", "disabled"],
+        help="Wandb logging mode (online=sync to cloud, offline=local only)",
+    )
+    wandb_group.add_argument(
+        "--wandb-project",
+        type=str,
+        default="speechlm",
+        help="Project name for wandb",
     )
     wandb_group.add_argument(
         "--wandb-name",
@@ -177,9 +187,9 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # (1) Setup distributed training first to get rank info
-    # DeepSpeed launcher will set local_rank automatically
+    # Get local_rank from environment variable (set by torchrun) if not provided via CLI
     if args.local_rank is None:
-        args.local_rank = 0  # Default to 0 if not set by launcher
+        args.local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(args.local_rank)
     deepspeed.init_distributed()
 
@@ -215,8 +225,14 @@ def main():
         train_config = yaml.safe_load(f)
     logger.info(f"Loaded training config from: {args.train_config}")
 
+    # Copy train config to output directory for reproducibility
+    if rank == 0:
+        config_dest = args.output_dir / "train.yaml"
+        shutil.copy(args.train_config, config_dest)
+        logger.info(f"Copied training config to: {config_dest}")
+
     job_template_class = _all_job_types[train_config["job_type"]]
-    job_template = job_template_class(train_config)
+    job_template = job_template_class(train_config, is_train=True)
 
     # (4) build data iterator factory
     loading_config = train_config["data_loading"]
@@ -237,6 +253,7 @@ def main():
         rank=rank,
         world_size=world_size,
         shuffle=True,
+        save_loader_state=args.save_loader_state,
         seed=loading_config["seed"],
     )
 
@@ -254,17 +271,11 @@ def main():
 
     for spec in args.valid_unregistered_specifier.split():
         factory = DataIteratorFactory(
-            unregistered_specifier=spec,
-            registered_specifier="",
-            **valid_iterator_args
+            unregistered_specifier=spec, **valid_iterator_args
         )
         valid_iterator_factories[spec] = factory
     for spec in args.valid_registered_specifier.split():
-        factory = DataIteratorFactory(
-            unregistered_specifier="",
-            registered_specifier=spec,
-            **valid_iterator_args
-        )
+        factory = DataIteratorFactory(registered_specifier=spec, **valid_iterator_args)
         valid_iterator_factories[spec] = factory
 
     # (5) build model
@@ -281,8 +292,8 @@ def main():
                 "train_config": train_config,
             }
             wandb.init(
-                mode="offline",
-                project="local",
+                mode=args.wandb_mode,
+                project=args.wandb_project,
                 name=wandb_name,
                 config=wandb_argument_record,
                 tags=args.wandb_tags,
@@ -291,7 +302,10 @@ def main():
             )
         else:
             wandb.init(mode="disabled")
-        logger.info(f"wandb initialization: name={wandb_name}")
+        logger.info(
+            f"wandb initialization: mode={args.wandb_mode}, "
+            f"project={args.wandb_project}, name={wandb_name}"
+        )
     elif args.logger_type == "swanlab":
         swanlab_name = args.swanlab_name or f"run_{args.output_dir.name}"
         if rank == 0:

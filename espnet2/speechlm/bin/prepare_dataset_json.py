@@ -1,30 +1,16 @@
 #!/usr/bin/env python3
-"""Prepare dataset JSON from multiple data sources.
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
-This script combines multiple data sources (audio and text) into a unified JSON file.
-Each data source is specified as a triplet: name,path,reader
-- name: audio1, audio2, ... or text1, text2, ...
-- path: valid path to data source
-- reader: lhotse_audio or text
-"""
+"""Script for preparing dataset JSON from multimodal data sources."""
 
 import argparse
 import json
 import logging
 from pathlib import Path
 
-from espnet2.speechlm.configuration.task_conf import SUPPORTED_ENTRIES
-from espnet2.speechlm.dataloader.multimodal_loader.audio_loader import (
-    LhotseAudioReader,
-    ArkiveAudioReader,
-)
-from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
-
-READER_TYPES = {
-    "lhotse_audio": LhotseAudioReader,
-    "arkive_audio": ArkiveAudioReader,
-    "text": TextReader,
-}
+from espnet2.speechlm.dataloader.multimodal_loader import ALL_DATA_LOADERS
+from espnet2.speechlm.dataloader.task_conf import SUPPORTED_ENTRIES
 
 
 def validate_triplet(triplet: str):
@@ -47,7 +33,7 @@ def validate_triplet(triplet: str):
 
     name, path, reader = parts
 
-    # Validate name (audio1, audio2, ... or text1, text2, ...)
+    # Validate name (audio1, audio2, ... or text1, text2, ... or dialogue)
     if name not in SUPPORTED_ENTRIES:
         raise ValueError(f"Invalid entry name {name}")
 
@@ -60,8 +46,10 @@ def validate_triplet(triplet: str):
     absolute_path = str(path_obj.resolve())
 
     # Validate reader
-    if reader not in READER_TYPES:
-        raise ValueError(f"Invalid reader '{reader}': must be one of {READER_TYPES.keys()}")
+    if reader not in ALL_DATA_LOADERS:
+        raise ValueError(
+            f"Invalid reader '{reader}': must be {', '.join(ALL_DATA_LOADERS.keys())}"
+        )
 
     return name, absolute_path, reader
 
@@ -96,9 +84,7 @@ def prepare_dataset_json(
         triplet_info.append({"name": name, "path": path, "reader": reader})
 
         # Create appropriate reader
-        if reader not in READER_TYPES:
-            raise ValueError(f"Invalid reader '{reader}': must be one of {READER_TYPES.keys()}")
-        reader_class = READER_TYPES[reader]
+        reader_class = ALL_DATA_LOADERS[reader]
         data_sources[name] = reader_class(path)
 
     # Find valid samples (those that exist in ALL data sources)
@@ -137,7 +123,9 @@ def get_parser():
         nargs="+",
         required=True,
         help="List of name,path,reader triplets "
-        "(e.g., audio1,/path/to/audio,lhotse_audio)",
+        "(e.g., audio1,/path/to/audio,lhotse_audio "
+        "or text1,/path/to/text,text "
+        "or dialogue1,/path/to/dialogue_folder,dialogue)",
     )
     parser.add_argument(
         "--output_json",

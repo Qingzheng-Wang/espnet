@@ -169,40 +169,30 @@ class CombinedDataset(Dataset):
             dataset_paths.append((dataset_name, registry_data[dataset_name]))
             seen_names.add(dataset_name)
 
-        # Step 2: Load all datasets (parallel or sequential based on num_worker)
-        # Prepare arguments for loading
+        # Step 2: Load all datasets in parallel using multiprocessing
+        # Prepare arguments for multiprocessing
         worker_args = [(name, path, rank, world_size) for name, path in dataset_paths]
 
-        if num_worker == 0:
-            # Sequential loading (avoid nested multiprocessing issues)
-            for args in worker_args:
-                dataset_name, dataset, dataset_len = _load_dataset_worker(args)
-                self.datasets[dataset_name] = dataset
-                logging.info(
-                    f"Loaded dataset [{dataset_name}]. "
-                    f"Local dataset size: [{dataset_len}]."
-                )
-        else:
-            # Parallel loading using multiprocessing
-            max_workers = min(num_worker, len(dataset_paths))
-            max_workers = max(1, max_workers)
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all loading tasks
-                futures = [
-                    executor.submit(_load_dataset_worker, args) for args in worker_args
-                ]
+        # Use ProcessPoolExecutor for parallel loading
+        max_workers = min(num_worker, len(dataset_paths))
+        max_workers = max(1, max_workers)
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all loading tasks
+            futures = [
+                executor.submit(_load_dataset_worker, args) for args in worker_args
+            ]
 
-                # Collect results as they complete
-                for future in as_completed(futures):
-                    try:
-                        dataset_name, dataset, dataset_len = future.result()
-                        self.datasets[dataset_name] = dataset
-                        logging.info(
-                            f"Loaded dataset [{dataset_name}]. "
-                            f"Local dataset size: [{dataset_len}]."
-                        )
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to load dataset: {e}") from e
+            # Collect results as they complete
+            for future in as_completed(futures):
+                try:
+                    dataset_name, dataset, dataset_len = future.result()
+                    self.datasets[dataset_name] = dataset
+                    logging.info(
+                        f"Loaded dataset [{dataset_name}]. "
+                        f"Local dataset size: [{dataset_len}]."
+                    )
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load dataset: {e}") from e
 
     def _load_registry(self) -> Dict[str, str]:
         """Load and merge registry files from ESPNET_DATASET_REGISTRY env variable.
@@ -289,4 +279,8 @@ class CombinedDataset(Dataset):
             Dictionary with keys from data entry names
         """
         _, dataset_name, sample_id = key
+<<<<<<< HEAD
         return key, self.datasets[dataset_name][sample_id]
+=======
+        return key, self.datasets[dataset_name][sample_id]
+>>>>>>> jinchuan/pr1_revise_bin

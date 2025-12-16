@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
-Script for preparing length statistics from training/validation data.
-This script analyzes data lengths and generates statistics for batching.
-"""
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
+"""Script for collecting sequence length statistics for efficient batching."""
 
 import argparse
 import json
@@ -43,9 +43,9 @@ def get_parser() -> argparse.ArgumentParser:
         for spec_type in ["unregistered", "registered"]:
             if spec_type == "unregistered":
                 format_str = "task:name:data_json[:factor]"
-                example = "audio_to_text:librispeech:train.json:2.0"
+                example = "asr:librispeech:train.json:2.0"
             else:
-                format_str = "text_to_audio:name[:factor]"
+                format_str = "task:name[:factor]"
                 example = "tts:ljspeech:1.5"
 
             parser.add_argument(
@@ -89,7 +89,6 @@ def worker(
 ):
     """Worker function to collect length statistics for a data shard."""
     # Create iterator with appropriate specifier
-    # IMPORTANT: num_workers=0 to avoid nested multiprocessing
     iterator = DataIteratorFactory(
         unregistered_specifier=unregistered_spec,
         registered_specifier=registered_spec,
@@ -97,14 +96,20 @@ def worker(
         world_size=world_size,
         shuffle=False,
         sequential_load=True,
-        num_workers=0,  # Must be 0 to avoid daemon process creating children
+        num_workers=0,
         collate_fn=lambda x: x[0],
     ).build_iter()
 
     # Collect statistics for this shard
     stats = {}
     for key, data_dict in iterator:
+        key = tuple(key)
         stats[key] = preprocessor.find_length(key, data_dict)
+
+        if len(stats) % 1000 == 0:
+            logging.getLogger(__name__).info(
+                f"Worker {rank}: Processed {len(stats)} entries"
+            )
 
     return stats
 
@@ -187,7 +192,7 @@ def main():
     with open(args.train_config) as f:
         config = yaml.safe_load(f)
 
-    job_template = _all_job_types[config["job_type"]](config)
+    job_template = _all_job_types[config["job_type"]](config, is_train=True)
     preprocessor = job_template.build_preprocessor()
 
     # Collect all specifiers to process
