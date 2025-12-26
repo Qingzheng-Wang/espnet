@@ -14,11 +14,13 @@ from pathlib import Path
 import deepspeed
 import torch
 import wandb
+import swanlab
 import yaml
 
 from espnet2.speechlm.dataloader.iterator import DataIteratorFactory
 from espnet2.speechlm.model import _all_job_types
 from espnet2.speechlm.trainer.deepspeed_trainer import DeepSpeedTrainer
+from espnet2.speechlm.utils.model_summary import model_summary
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -40,13 +42,13 @@ def get_parser() -> argparse.ArgumentParser:
     # Training configuration
     train_group = parser.add_argument_group("Training Configuration")
     train_group.add_argument(
-        "--train-config",
+        "--train_config",
         type=Path,
         required=True,
         help="Path to training configuration file",
     )
     train_group.add_argument(
-        "--output-dir",
+        "--output_dir",
         type=Path,
         default=Path("exp/train"),
         help="Directory to save checkpoints and logs",
@@ -61,7 +63,7 @@ def get_parser() -> argparse.ArgumentParser:
     # Data configuration
     data_group = parser.add_argument_group("Data Configuration")
     data_group.add_argument(
-        "--train-unregistered-specifier",
+        "--train_unregistered_specifier",
         type=str,
         default="",
         required=False,
@@ -70,7 +72,7 @@ def get_parser() -> argparse.ArgumentParser:
         "(e.g., 'asr:librispeech:train.json:2.0')",
     )
     data_group.add_argument(
-        "--train-registered-specifier",
+        "--train_registered_specifier",
         type=str,
         default="",
         required=False,
@@ -79,7 +81,7 @@ def get_parser() -> argparse.ArgumentParser:
         "(e.g., 'tts:ljspeech:1.5')",
     )
     data_group.add_argument(
-        "--valid-unregistered-specifier",
+        "--valid_unregistered_specifier",
         type=str,
         default="",
         required=False,
@@ -88,7 +90,7 @@ def get_parser() -> argparse.ArgumentParser:
         "(e.g., 'asr:librispeech:valid.json')",
     )
     data_group.add_argument(
-        "--valid-registered-specifier",
+        "--valid_registered_specifier",
         type=str,
         default="",
         required=False,
@@ -97,13 +99,13 @@ def get_parser() -> argparse.ArgumentParser:
         "(e.g., 'tts:ljspeech:1.0')",
     )
     data_group.add_argument(
-        "--stats-dir",
+        "--stats_dir",
         type=Path,
         required=True,
         help="The folder of length statistics",
     )
     data_group.add_argument(
-        "--save-loader-state",
+        "--save_loader_state",
         action="store_true",
         default=False,
         help="Whether to save the loader state for resuming training",
@@ -112,36 +114,43 @@ def get_parser() -> argparse.ArgumentParser:
     # Logging configuration
     log_group = parser.add_argument_group("Logging")
     log_group.add_argument(
-        "--log-level",
+        "--log_level",
         type=str,
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level",
     )
+    log_group.add_argument(
+        "--logger_type",
+        type=str,
+        default="wandb",
+        choices=["wandb", "swanlab"],
+        help="Logger type",
+    )
 
     # Wandb configuration
     wandb_group = parser.add_argument_group("Weights & Biases Configuration")
     wandb_group.add_argument(
-        "--wandb-mode",
+        "--wandb_mode",
         type=str,
         default="online",
         choices=["online", "offline", "disabled"],
         help="Wandb logging mode (online=sync to cloud, offline=local only)",
     )
     wandb_group.add_argument(
-        "--wandb-project",
+        "--wandb_project",
         type=str,
         default="speechlm",
         help="Project name for wandb",
     )
     wandb_group.add_argument(
-        "--wandb-name",
+        "--wandb_name",
         type=str,
         default=None,
         help="Run name for wandb (defaults to output dir name)",
     )
     wandb_group.add_argument(
-        "--wandb-tags",
+        "--wandb_tags",
         type=str,
         nargs="+",
         default=None,
@@ -151,26 +160,26 @@ def get_parser() -> argparse.ArgumentParser:
     # SwanLab configuration
     swanlab_group = parser.add_argument_group("SwanLab Logging")
     swanlab_group.add_argument(
-        "--swanlab-project",
+        "--swanlab_project",
         type=str,
         default="speechlm",
         help="SwanLab project name",
     )
     swanlab_group.add_argument(
-        "--swanlab-name",
+        "--swanlab_name",
         type=str,
         default=None,
         help="Run name for SwanLab (defaults to output dir name)",
     )
     swanlab_group.add_argument(
-        "--swanlab-tags",
+        "--swanlab_tags",
         type=str,
         nargs="+",
         default=None,
         help="Tags for SwanLab runs",
     )
     swanlab_group.add_argument(
-        "--swanlab-mode",
+        "--swanlab_mode",
         type=str,
         default="cloud",
         choices=["cloud", "local", "disabled"],
@@ -178,7 +187,6 @@ def get_parser() -> argparse.ArgumentParser:
     )
 
     return parser
-
 
 def main():
     parser = get_parser()
