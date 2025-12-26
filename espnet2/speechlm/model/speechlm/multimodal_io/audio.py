@@ -5,13 +5,15 @@
 
 import math
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import joblib
 import numpy as np
 import torch
+import librosa
 
 from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
+from espnet2.speechlm.model.speechlm.multimodal_io.whisper.whisper_audio_tower import WhisperAudioTower
 
 
 # NOTE(Jinchuan): derived from egs2/TEMPLATE/asr1/pyscripts/feats/dump_km_label.py
@@ -81,6 +83,7 @@ class DiscreteAudioIO(AbsIO):
         stream_weights: List[float] = None,
         delay_interleave: bool = False,
         device: str = "cpu",
+        skip_init_encoder: bool = False,
     ):
         """Initialize discrete audio I/O handler with combined tokenizers.
 
@@ -98,6 +101,7 @@ class DiscreteAudioIO(AbsIO):
             delay_interleave: Whether to apply delay interleaving to multi-stream
                 tokens (default: False)
             device: Device to run models on (default: "cpu")
+            skip_init_encoder: Skip encoder initialization (for prepare_stats)
         """
         # Initialize parent class (AbsIO which inherits from both ABC and Module)
         super().__init__(modality="audio", is_discrete=True)
@@ -123,8 +127,14 @@ class DiscreteAudioIO(AbsIO):
                 "Provide either codec_choice or ssl_model_path."
             )
 
-        self._init_codec(codec_choice, codec_hf_model_tag, codec_max_token_per_frame)
-        self._init_ssl(ssl_choice, ssl_hf_model_tag)
+        # Initialize models or minimal attributes
+        if not skip_init_encoder:
+            self._init_codec(codec_choice, codec_hf_model_tag, codec_max_token_per_frame)
+            self._init_ssl(ssl_choice, ssl_hf_model_tag)
+        else:
+            self._init_codec_minimal_attributes(codec_choice, codec_hf_model_tag, codec_max_token_per_frame)
+            self._init_ssl_minimal_attributes(ssl_choice, ssl_hf_model_tag)
+
         self._init_sanity_check()
 
     def _init_codec(
@@ -271,6 +281,101 @@ class DiscreteAudioIO(AbsIO):
             self.ssl_n_streams = 1
             # SSL uses single vocabulary, stored as list for consistency
             self.ssl_vocab_size = [self.km_model.C.size(1)]
+            self.ssl_sample_rate = 16000
+            self.ssl_frame_shift = 320
+            self.ssl_frame_per_second = self.ssl_sample_rate // self.ssl_frame_shift
+
+        else:
+            raise NotImplementedError(f"Cannot support SSL choice: {ssl_choice}")
+
+    def _init_codec_minimal_attributes(
+        self,
+        codec_choice: str = None,
+        codec_hf_model_tag: str = None,
+        codec_max_token_per_frame: int = 8,
+    ):
+        """Initialize minimal codec attributes without loading model weights.
+
+        This is used when skip_init_encoder=True (e.g., for prepare_stats).
+        Only loads configurations and sets necessary attributes.
+        """
+        if codec_choice is None:
+            # No codec tokenizer
+            self.codec_model = None
+            self.codec_n_streams = 0
+            self.codec_vocab_size = []
+            self.codec_sample_rate = None
+            self.codec_frame_shift = None
+            self.codec_frame_per_second = None
+
+        elif codec_choice == "Xcodec":
+            # For Xcodec, we can load config without weights
+            try:
+                from transformers import XcodecConfig
+            except ImportError as e:
+                raise ImportError(f"Failed to import 'transformers': {e}")
+
+            # Load only config, not the model weights
+            config = XcodecConfig.from_pretrained(codec_hf_model_tag)
+            self.codec_model = None  # Don't load actual model
+            self.codec_n_streams = min(config.num_quantizers, codec_max_token_per_frame)
+            self.codec_vocab_size = [config.codebook_size] * self.codec_n_streams
+            self.codec_sample_rate = config.sample_rate
+            self.codec_frame_shift = config.hop_length
+            self.codec_frame_per_second = config.frame_rate
+
+            bandwidth_per_quantizer = (
+                math.log2(config.codebook_size) * self.codec_frame_per_second / 1000
+            )
+            codec_bandwidth = bandwidth_per_quantizer * self.codec_n_streams
+            self.codec_bandwidth = min(
+                config.target_bandwidths, key=lambda x: abs(x - codec_bandwidth)
+            )
+
+        elif codec_choice == "ESPnet":
+            # For ESPnet, we need to load model to extract metadata
+            # This is a limitation of ESPnet codec design
+            raise NotImplementedError(
+                f"skip_init_encoder=True not supported for ESPnet codec. "
+                f"ESPnet codec requires loading the model to extract metadata. "
+                f"Please use Xcodec or set skip_init_encoder=False."
+            )
+
+        else:
+            raise NotImplementedError(f"Cannot support codec choice: {codec_choice}")
+
+    def _init_ssl_minimal_attributes(
+        self,
+        ssl_choice: str = None,
+        ssl_hf_model_tag: str = None,
+    ):
+        """Initialize minimal SSL attributes without loading model weights.
+
+        This is used when skip_init_encoder=True (e.g., for prepare_stats).
+        Only sets necessary attributes based on known configurations.
+        """
+        if ssl_choice is None:
+            # No SSL tokenizer
+            self.ssl_model = None
+            self.km_model = None
+            self.ssl_n_streams = 0
+            self.ssl_vocab_size = []
+            self.ssl_sample_rate = None
+            self.ssl_frame_shift = None
+            self.ssl_frame_per_second = None
+
+        elif ssl_choice == "ESPnet":
+            if ssl_hf_model_tag != "espnet/xeus":
+                raise NotImplementedError(
+                    f"skip_init_encoder=True only supports espnet/xeus, "
+                    f"got '{ssl_hf_model_tag}'"
+                )
+
+            # Hardcode XEUS known values (since only XEUS is supported)
+            self.ssl_model = None
+            self.km_model = None
+            self.ssl_n_streams = 1
+            self.ssl_vocab_size = []
             self.ssl_sample_rate = 16000
             self.ssl_frame_shift = 320
             self.ssl_frame_per_second = self.ssl_sample_rate // self.ssl_frame_shift
@@ -779,14 +884,13 @@ class DiscreteAudioIO(AbsIO):
     def copy_for_worker(self) -> "DiscreteAudioIO":
         """Create lightweight copy for multiprocessing workers.
 
-        Creates a new instance with the same parameters (loads models)
-        then removes the heavy model components to reduce memory usage
-        in workers while keeping necessary metadata.
+        Creates a new instance with skip_init_encoder=True to avoid loading
+        heavy model components that are not needed for preprocessing.
 
         Returns:
             Lightweight copy suitable for workers
         """
-        # Create new instance with same parameters (loads models)
+        # Create new instance with skip_init_encoder=True to avoid loading models
         worker_copy = self.__class__(
             codec_choice=self.codec_choice,
             codec_hf_model_tag=self.codec_hf_model_tag,
@@ -796,12 +900,8 @@ class DiscreteAudioIO(AbsIO):
             stream_weights=self.stream_weights,
             delay_interleave=self.delay_interleave,
             device="cpu",  # Workers use CPU
+            skip_init_encoder=True,  # Skip model loading for workers
         )
-
-        # Remove heavy model components after initialization
-        worker_copy.codec_model = None
-        worker_copy.ssl_model = None
-        worker_copy.km_model = None
 
         return worker_copy
 
@@ -812,6 +912,14 @@ class ContinuousAudioIO(AbsIO):
     This class handles continuous audio representations using neural encoders
     that produce dense feature vectors instead of discrete tokens.
     """
+    SUPPORTED_HF_MODEL_TAGS = [
+        "Qwen/Qwen2.5-Omni-7B", "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+        "openai/whisper-large-v3-turbo", "openai/whisper-large-v3",
+        "openai/whisper-large-v2", "openai/whisper-large",
+        "openai/whisper-small","openai/whisper-tiny","openai/whisper-base",
+        "openai/whisper-medium.en","openai/whisper-small.en","openai/whisper-tiny.en",
+        "openai/whisper-base.en",
+    ]
 
     def __init__(
         self,
@@ -820,6 +928,7 @@ class ContinuousAudioIO(AbsIO):
         attn_implementation: str = None,
         dtype: str = "bfloat16",
         device: str = "cpu",
+        skip_init_encoder: bool = False,
     ):
         """Initialize continuous audio encoder.
 
@@ -830,6 +939,7 @@ class ContinuousAudioIO(AbsIO):
             attn_implementation: Attention implementation type
             dtype: Model dtype ("bfloat16", "float16", etc.)
             device: Device for model ("cpu", "cuda", etc.)
+            skip_init_encoder: Skip encoder initialization (for prepare_stats)
         """
         super().__init__(modality="audio", is_discrete=False)
 
@@ -842,8 +952,12 @@ class ContinuousAudioIO(AbsIO):
         # Convert string dtype to torch dtype
         self.dtype = getattr(torch, dtype)
 
-        # Initialize the encoder
-        self._init_encoder()
+        # Initialize the encoder (skip if requested for prepare_stats)
+        if not skip_init_encoder:
+            self._init_encoder()
+        else:
+            # Set minimal attributes needed for preprocessing
+            self._init_minimal_attributes()
 
     def _init_encoder(self):
         """Initialize the audio encoder model."""
@@ -878,9 +992,149 @@ class ContinuousAudioIO(AbsIO):
                 self.hop_length = self.processor.hop_length
                 self.n_samples = self.processor.n_samples
 
+            elif self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct":
+                from transformers import (
+                    Qwen3OmniMoeForConditionalGeneration,
+                    Qwen3OmniMoeProcessor,
+                )
+
+                # Load full Qwen multimodal model
+                full_model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
+                    self.encoder_hf_model_tag,
+                    attn_implementation=self.attn_implementation,
+                    torch_dtype=self.dtype,
+                )
+
+                # Remove unnecessary components, keep only audio tower
+                del full_model.thinker.model  # Remove language model
+                del full_model.thinker.visual  # Remove vision components
+                del full_model.thinker.lm_head  # Remove output head
+                self.model = full_model.thinker.to(dtype=self.dtype, device=self.device)
+
+                # Load processor for audio preprocessing
+                self.processor = Qwen3OmniMoeProcessor.from_pretrained(
+                    self.encoder_hf_model_tag
+                ).feature_extractor
+
+                # Set model attributes
+                self.d_model = self.model.audio_tower.config.output_dim
+                self.sample_rate = self.processor.sampling_rate
+                self.hop_length = self.processor.hop_length
+                self.n_samples = self.processor.n_samples
+                # Qwen3 Omni split input into chunks of 100 frames, then
+                # process each chunk separately, for the last chunk less
+                # than 100 frames, process it without padding.
+                self.chunk_length = self.model.audio_tower.config.n_window * 2
+            
+            elif "whisper" in self.encoder_hf_model_tag:
+                if self.encoder_hf_model_tag not in self.SUPPORTED_HF_MODEL_TAGS:
+                    raise ValueError(
+                        f"Failed to load Whisper model {self.encoder_hf_model_tag}."
+                        f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
+                    )
+                
+                from transformers import WhisperProcessor
+
+                chunk_length = 3000 # 30s, hop length 10ms => 3000 frames
+                self.model = WhisperAudioTower(
+                    hf_model_tag=self.encoder_hf_model_tag,
+                    chunk_length=chunk_length,
+                    dtype=self.dtype,
+                    device=self.device,
+                )
+
+                self.processor = WhisperProcessor.from_pretrained(
+                    self.encoder_hf_model_tag,
+                ).feature_extractor
+
+                self.d_model = self.model.d_model
+                self.sample_rate = self.processor.sampling_rate
+                self.hop_length = self.processor.hop_length
+                self.n_samples = self.processor.n_samples
+                
             else:
                 raise NotImplementedError(
                     f"Model {self.encoder_hf_model_tag} not implemented"
+                    f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
+                )
+        else:
+            raise NotImplementedError(
+                f"Encoder choice {self.encoder_choice} not implemented"
+            )
+
+    def _init_minimal_attributes(self):
+        """Initialize minimal attributes needed for preprocessing without loading model.
+
+        This is used when skip_init_encoder=True (e.g., for prepare_stats).
+        Only loads the processor and sets necessary attributes.
+        """
+        if self.encoder_choice == "huggingface":
+            if self.encoder_hf_model_tag == "Qwen/Qwen2.5-Omni-7B":
+                from transformers import Qwen2_5OmniProcessor
+
+                # Load only processor for preprocessing
+                self.processor = Qwen2_5OmniProcessor.from_pretrained(
+                    self.encoder_hf_model_tag
+                ).feature_extractor
+
+                # Set model attributes from processor config
+                # These are the minimal attributes needed for preprocessing
+                self.sample_rate = self.processor.sampling_rate
+                self.hop_length = self.processor.hop_length
+                self.n_samples = self.processor.n_samples
+
+                self.d_model = None
+
+                # Set model to None (not loaded)
+                self.model = None
+
+            elif self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct":
+                from transformers import Qwen3OmniMoeProcessor
+
+                # Load only processor for preprocessing
+                self.processor = Qwen3OmniMoeProcessor.from_pretrained(
+                    self.encoder_hf_model_tag
+                ).feature_extractor
+
+                # Set model attributes from processor config
+                self.sample_rate = self.processor.sampling_rate
+                self.hop_length = self.processor.hop_length
+                self.n_samples = self.processor.n_samples
+
+                self.d_model = None
+                self.chunk_length = 200
+
+                # Set model to None (not loaded)
+                self.model = None
+
+            elif "whisper" in self.encoder_hf_model_tag:
+                if self.encoder_hf_model_tag not in self.SUPPORTED_HF_MODEL_TAGS:
+                    raise ValueError(
+                        f"Failed to load Whisper model {self.encoder_hf_model_tag}."
+                        f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
+                    )
+
+                from transformers import WhisperProcessor
+
+                # Load only processor for preprocessing
+                self.processor = WhisperProcessor.from_pretrained(
+                    self.encoder_hf_model_tag
+                ).feature_extractor
+
+                # Set model attributes from processor config
+                self.sample_rate = self.processor.sampling_rate
+                self.hop_length = self.processor.hop_length
+                self.n_samples = self.processor.n_samples
+
+                self.d_model = None
+
+                # Set model to None (not loaded)
+                self.model = None
+
+            else:
+                raise NotImplementedError(
+                    f"Model {self.encoder_hf_model_tag} not implemented"
+                    f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
                 )
         else:
             raise NotImplementedError(
@@ -906,7 +1160,7 @@ class ContinuousAudioIO(AbsIO):
         """
         wav, fs = data
         if fs != self.sample_rate:
-            raise ValueError("Imcompatible sampling rate")
+            wav = librosa.resample(wav, orig_sr=fs, target_sr=self.sample_rate)
 
         if wav.shape[0] != 1:
             raise ValueError("Only support single-channel audio")
@@ -931,9 +1185,7 @@ class ContinuousAudioIO(AbsIO):
         before_length = output["attention_mask"].sum()
         feat = output["input_features"][0, :, :before_length].T
 
-        # Calculate output length after model's two-layer downsampling
-        after_length = (before_length - 1) // 2 + 1  # First downsample
-        after_length = (after_length - 2) // 2 + 1  # Second downsample
+        after_length = self._encoder_output_length(before_length)
 
         paddings = np.zeros((after_length, 1)).astype(np.int32)
 
@@ -948,7 +1200,7 @@ class ContinuousAudioIO(AbsIO):
         with proper attention masking based on actual audio lengths.
 
         Args:
-            batch_data: Audio tensor [batch, samples, channels]
+            batch_data: Audio tensor [batch_size, num_samples, mel_channels]
             length: Frame lengths for each sample [batch]
 
         Returns:
@@ -960,17 +1212,117 @@ class ContinuousAudioIO(AbsIO):
         mask = (axis.unsqueeze(0) < length.unsqueeze(1)).int()
 
         # Extract audio features using the encoder
+        
         audio_features = self.model.get_audio_features(
             batch_data,
             feature_attention_mask=mask,
         )
+
         # Calculate output lengths after model's downsampling
-        output_length = (length - 1) // 2 + 1
-        output_length = (output_length - 2) // 2 + 1
-        # Split concatenated features back into individual samples
-        audio_features = audio_features.split(output_length.tolist(), dim=0)
+        output_length = self._encoder_output_length(length)
+
+        if "Qwen" in self.encoder_hf_model_tag:
+            # Split concatenated features back into individual samples
+            # Qwen audio tower outputs concatenated features like [■■■■■ ■■■ ■■■■■■■]
+            # Need to split back into individual samples
+            audio_features = audio_features.split(output_length.tolist(), dim=0)
 
         return audio_features
+
+    def _encoder_output_length(
+        self,
+        length: Union[torch.Tensor, int],
+    ) -> Union[torch.Tensor, int]:
+        """Calculate audio encoder output length.
+
+        Args:
+            length: Input length tensor of shape [batch]
+
+        Returns:
+            Output length tensor of shape [batch]
+        """
+        if self.encoder_hf_model_tag == "Qwen/Qwen2.5-Omni-7B":
+            output_length = self._downsampling_length(
+                length,
+                kernel_sizes=[3, 3, 2],
+                strides=[1, 2, 2],
+                paddings=[1, 1, 0],
+                dilations=[1, 1, 1],
+            )
+        elif self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct":
+            input_length_leave = length % self.chunk_length
+            output_length_leave = self._downsampling_length(
+                input_length_leave,
+                kernel_sizes=[3, 3, 3],
+                strides=[2, 2, 2],
+                paddings=[1, 1, 1],
+                dilations=[1, 1, 1],
+            )
+
+            chunk_num = length // self.chunk_length
+            chunk_output_length = self._downsampling_length(
+                self.chunk_length,
+                kernel_sizes=[3, 3, 3],
+                strides=[2, 2, 2],
+                paddings=[1, 1, 1],
+                dilations=[1, 1, 1],
+            )
+
+            output_length = chunk_num * chunk_output_length + output_length_leave
+        
+        elif "whisper" in self.encoder_hf_model_tag:
+            output_length = self._downsampling_length(
+                length,
+                kernel_sizes=[3, 3],
+                strides=[1, 2],
+                paddings=[1, 1],
+                dilations=[1, 1],
+            )
+        else:
+            raise NotImplementedError(
+                f"Model {self.encoder_hf_model_tag} not supported"
+                f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
+            )
+
+        return output_length
+
+    def _downsampling_length(
+        self,
+        length: torch.Tensor,
+        kernel_sizes: List[int],
+        strides: List[int] = None,
+        paddings: List[int] = None,
+        dilations: List[int] = None,
+    ) -> torch.Tensor:
+        """Calculate output length after convolution/pooling downsampling.
+
+        Args:
+            length: Input length tensor of shape [batch]
+            kernel_sizes: List of kernel sizes
+            strides: List of strides
+            paddings: List of paddings
+            dilations: List of dilations
+
+        Returns:
+            Output length tensor of shape [batch]
+        """
+        if strides is None:
+            strides = [1] * len(kernel_sizes)
+        if paddings is None:
+            paddings = [0] * len(kernel_sizes)
+        if dilations is None:
+            dilations = [1] * len(kernel_sizes)
+
+        assert len(kernel_sizes) == len(strides) == len(paddings) == len(dilations), (
+            "kernel_sizes, strides, paddings, and dilations must have the same length",
+        )
+        for kernel_size, stride, padding, dilation in zip(
+            kernel_sizes, strides, paddings, dilations
+        ):
+            effective_kernel_size = dilation * (kernel_size - 1) + 1
+            length = (length + 2 * padding - effective_kernel_size) // stride + 1
+
+        return length
 
     def find_length(self, data: Tuple[np.ndarray, int]) -> int:
         """Calculate frame length after encoding.
@@ -985,12 +1337,10 @@ class ContinuousAudioIO(AbsIO):
             Frame length after encoding (number of frames)
         """
         wav, _ = data
-        frame_length = wav.shape[-1] // self.hop_length  # Initial frames
+        before_length = wav.shape[-1] // self.hop_length  # Initial frames
         # Apply same downsampling as the encoder model
-        frame_length = (frame_length - 1) // 2 + 1  # First layer downsampling
-        frame_length = (frame_length - 2) // 2 + 1  # Second layer downsampling
-
-        return int(frame_length)
+        after_length = self._encoder_output_length(before_length)
+        return after_length
 
     def copy_for_worker(self) -> "ContinuousAudioIO":
         """Create lightweight copy for multiprocessing workers.
@@ -1001,19 +1351,15 @@ class ContinuousAudioIO(AbsIO):
         Returns:
             Lightweight copy suitable for workers
         """
-        # Create new instance with same parameters
+        # Create new instance with skip_init_encoder=True to avoid loading model
         worker_copy = self.__class__(
             encoder_choice=self.encoder_choice,
             encoder_hf_model_tag=self.encoder_hf_model_tag,
             attn_implementation=self.attn_implementation,
             dtype=self.dtype_str,
             device="cpu",  # Workers use CPU
+            skip_init_encoder=True,
         )
-
-        # Remove the heavy model components for workers
-        # Keep only the processor which is needed for preprocessing
-        del worker_copy.model
-        worker_copy.model = None
 
         return worker_copy
 

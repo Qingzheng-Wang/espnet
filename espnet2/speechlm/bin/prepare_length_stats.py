@@ -43,10 +43,10 @@ def get_parser() -> argparse.ArgumentParser:
         for spec_type in ["unregistered", "registered"]:
             if spec_type == "unregistered":
                 format_str = "task:name:data_json[:factor]"
-                example = "asr:librispeech:train.json:2.0"
+                example = "audio_to_text:librispeech:train.json:2.0"
             else:
                 format_str = "task:name[:factor]"
-                example = "tts:ljspeech:1.5"
+                example = "text_to_audio:ljspeech:1.5"
 
             parser.add_argument(
                 f"--{split}-{spec_type}-specifier",
@@ -191,6 +191,12 @@ def main():
     # Build preprocessor from config
     with open(args.train_config) as f:
         config = yaml.safe_load(f)
+
+    # Add skip_init_encoder=True to all multimodal_io configs
+    # This prevents loading heavy models during prepare_stats
+    for io_name, io_kwargs in config["multimodal_io"].items():
+        if io_name == "continuous_audio" or io_name == "discrete_audio":
+            io_kwargs["skip_init_encoder"] = True
 
     job_template = _all_job_types[config["job_type"]](config, is_train=True)
     preprocessor = job_template.build_preprocessor()
