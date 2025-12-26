@@ -425,7 +425,28 @@ class SpeechLMPreprocessor:
                     "during inference, input dialogue should not contain "
                     "model output (assistant message)"
                 )
-            return data_dict["dialogue"]
+
+            # Map modality names (e.g., "audio1", "text1") to actual IO types
+            mapped_messages = []
+            for role, modality, content in data_dict["dialogue"]:
+                # Extract base modality (remove trailing digits)
+                base_modality = re.sub(r'\d+$', '', modality)
+
+                # Map to actual IO type
+                if base_modality == "audio":
+                    # User/system use input audio IO, assistant uses output audio IO
+                    if role == "user" or role == "system":
+                        io_type = self.audio_input
+                    else:
+                        io_type = self.audio_output
+                elif base_modality == "text":
+                    io_type = "text"
+                else:
+                    raise ValueError(f"Unsupported modality: {modality}")
+
+                mapped_messages.append((role, io_type, content))
+
+            return mapped_messages
         else:
             task_config = SPEECHLM_TASK_CONFIGS[task]
             messages = list()
@@ -434,14 +455,16 @@ class SpeechLMPreprocessor:
                 if role == "assistant" and not self.is_train:
                     break
 
+                base_entry = re.sub(r'\d+$', '', entry)
+
                 # Select IO type based on entry name and role
-                if bool(re.match(r"^audio", entry)):
+                if base_entry == "audio":
                     # User/system use input audio IO, assistant uses output audio IO
                     if role == "user" or role == "system":
                         this_io = self.audio_input
                     else:
                         this_io = self.audio_output
-                elif bool(re.match(r"^text", entry)):
+                elif base_entry == "text":
                     this_io = "text"
                 else:
                     raise ValueError(f"Not supported data entry in template: {entry}")
@@ -449,13 +472,8 @@ class SpeechLMPreprocessor:
                 this_data = data_dict[entry]
                 message = (role, this_io, this_data)
                 messages.append(message)
-<<<<<<< HEAD
+
             return messages
-<<<<<<< HEAD
-=======
-            return messages
->>>>>>> jinchuan/pr1_revise_bin
-=======
 
     def _apply_cfg(self, seq, loss_masks, conti_feats, messages):
         audio_idx = [
@@ -486,4 +504,4 @@ class SpeechLMPreprocessor:
         conti_feats = [feat for feat in conti_feats if feat[0] == self.audio_output]
 
         return seq, loss_masks, conti_feats
->>>>>>> jinchuan/pr5_trainer
+

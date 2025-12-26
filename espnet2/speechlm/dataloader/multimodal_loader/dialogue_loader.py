@@ -5,6 +5,7 @@
 """Dialogue data loading utilities supporting multimodal conversation formats."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any, ItemsView, KeysView, List, Optional, Tuple, Union, ValuesView
 
@@ -57,19 +58,26 @@ class DialogueReader:
                 f"must be one of {self.VALID_ROLES}"
             )
 
-            assert modality in self.VALID_MODALITIES, (
+            # Extract base modality (remove trailing digits)
+            # e.g., "audio1" -> "audio", "text2" -> "text"
+            # modality in dialogue dataset should be like audio1, audio2,
+            # the following number is the index of the corresponding modality
+            # like the dialogue with two audios, there should be audio1 and audio2
+            base_modality = re.sub(r'\d+$', '', modality)
+
+            assert base_modality in self.VALID_MODALITIES, (
                 f"Invalid modality '{modality}' at index {i} for {key}: "
-                f"must be one of {self.VALID_MODALITIES}"
+                f"base type '{base_modality}' must be one of {self.VALID_MODALITIES}"
             )
 
-            # Validate and process content based on modality
-            if modality == "text":
+            # Validate and process content based on base modality
+            if base_modality == "text":
                 assert isinstance(content, str), (
                     f"Invalid text content at index {i} for {key}: "
                     f"expected string, got {type(content)}"
                 )
                 processed_content = content
-            elif modality == "audio":
+            elif base_modality == "audio":
                 # Load audio file
                 audio_path = Path(content)
 

@@ -208,7 +208,10 @@ class DeepSpeedTrainer:
 
             stats = {f"train/{k}": float(v.cpu()) for k, v in stats.items()}
             stats["train/lr"] = self.model_engine.get_lr()[0]
-            stats["train/grad_norm"] = self.model_engine.get_global_grad_norm()
+            # grad_norm may be None during gradient accumulation intermediate steps
+            grad_norm = self.model_engine.get_global_grad_norm()
+            if grad_norm is not None:
+                stats["train/grad_norm"] = grad_norm
             stats["time/iter"] = time.time() - iter_start
 
             # Log to active experiment tracker

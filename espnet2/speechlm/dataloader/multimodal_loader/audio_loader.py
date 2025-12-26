@@ -8,21 +8,6 @@ from pathlib import Path
 from typing import Iterator, Tuple
 
 import numpy as np
-import pandas as pd
-
-try:
-    from arkive import audio_read
-except ImportError:
-    raise ImportError(
-        "arkive is not installed. Please install at https://github.com/wanchichen/arkive"
-    )
-
-try:
-    import duckdb
-except ImportError:
-    raise ImportError(
-        "duckdb is not installed. Please install it with: pip install duckdb"
-    )
 
 try:
     from arkive import audio_read
