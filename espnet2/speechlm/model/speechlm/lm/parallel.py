@@ -269,7 +269,7 @@ def build_parallel_hf_class(model_hf_tag):
                 ):
                     continue
 
-                # Encode features to discrete codes
+                # Encode features to continuous features
                 io_indices = kwargs[f"{io_name}_indices"]
                 io_feats = kwargs[f"{io_name}_feats"]
                 io_lengths = kwargs[f"{io_name}_lengths"]
