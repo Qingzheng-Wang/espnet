@@ -13,7 +13,7 @@ import torch
 import librosa
 
 from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
-from espnet2.speechlm.model.speechlm.multimodal_io.whisper.whisper_audio_tower import WhisperAudioTower
+from espnet2.speechlm.model.speechlm.multimodal_io.audio_tower.whisper_audio_tower import WhisperAudioTower
 
 
 # NOTE(Jinchuan): derived from egs2/TEMPLATE/asr1/pyscripts/feats/dump_km_label.py
@@ -929,6 +929,8 @@ class ContinuousAudioIO(AbsIO):
         dtype: str = "bfloat16",
         device: str = "cpu",
         skip_init_encoder: bool = False,
+        encoder_config: Optional[str] = None,
+        encoder_model_file: Optional[str] = None,
     ):
         """Initialize continuous audio encoder.
 
@@ -940,6 +942,8 @@ class ContinuousAudioIO(AbsIO):
             dtype: Model dtype ("bfloat16", "float16", etc.)
             device: Device for model ("cpu", "cuda", etc.)
             skip_init_encoder: Skip encoder initialization (for prepare_stats)
+            encoder_config: if encoder_choice is owsm, provide the owsm train config here
+            encoder_model_file: if encoder_choice is owsm, provide the owsm checkpoint path here
         """
         super().__init__(modality="audio", is_discrete=False)
 
@@ -948,6 +952,8 @@ class ContinuousAudioIO(AbsIO):
         self.encoder_hf_model_tag = encoder_hf_model_tag
         self.attn_implementation = attn_implementation
         self.dtype_str = dtype
+        self.encoder_config = encoder_config
+        self.encoder_model_file = encoder_model_file
 
         # Convert string dtype to torch dtype
         self.dtype = getattr(torch, dtype)
@@ -1057,6 +1063,29 @@ class ContinuousAudioIO(AbsIO):
                     f"Model {self.encoder_hf_model_tag} not implemented"
                     f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
                 )
+        elif self.encoder_choice == "owsm":
+            # Use OWSM v4 medium
+            from espnet2.speechlm.model.speechlm.multimodal_io.audio_tower.owsm_audio_tower import OWSMAudioTower, OWSMProcessor
+
+            chunk_length = 3000 # 30s, hop length 10ms => 3000 frames
+            self.model = OWSMAudioTower(
+                owsm_train_config=self.encoder_config,
+                owsm_model_file=self.encoder_model_file,
+                chunk_length=chunk_length,
+                dtype=self.dtype,
+                device=self.device,
+            )
+
+            self.processor = OWSMProcessor(
+                owsm_train_config=self.encoder_config,
+                owsm_model_file=self.encoder_model_file,
+                device=self.device,
+            ).feature_extractor
+
+            self.d_model = self.model.d_model
+            self.sample_rate = self.processor.sampling_rate
+            self.hop_length = self.processor.hop_length
+            self.n_samples = self.processor.n_samples
         else:
             raise NotImplementedError(
                 f"Encoder choice {self.encoder_choice} not implemented"
@@ -1136,6 +1165,21 @@ class ContinuousAudioIO(AbsIO):
                     f"Model {self.encoder_hf_model_tag} not implemented"
                     f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
                 )
+        elif self.encoder_choice == "owsm":
+            from espnet2.speechlm.model.speechlm.multimodal_io.audio_tower.owsm_audio_tower import OWSMProcessor
+
+            self.processor = OWSMProcessor(
+                owsm_train_config=self.encoder_config,
+                owsm_model_file=self.encoder_model_file,
+                device="cpu",
+            ).feature_extractor
+
+            self.sample_rate = self.processor.sampling_rate
+            self.hop_length = self.processor.hop_length
+            self.n_samples = self.processor.n_samples
+
+            self.d_model = None
+            self.model = None
         else:
             raise NotImplementedError(
                 f"Encoder choice {self.encoder_choice} not implemented"
@@ -1162,12 +1206,14 @@ class ContinuousAudioIO(AbsIO):
         if fs != self.sample_rate:
             wav = librosa.resample(wav, orig_sr=fs, target_sr=self.sample_rate)
 
-        if wav.shape[0] != 1:
-            raise ValueError("Only support single-channel audio")
-        wav = wav[0]
+        if wav.shape[0] > 1:
+            # Downmix to mono by averaging
+            wav = wav.mean(axis=0, keepdims=True)
+            
+        # Flatten to 1D (samples,) as expected by the processor and downstream logic
+        wav = wav.reshape(-1)
 
-        if wav.shape[0] > self.n_samples:
-            raise ValueError("Input audio is too long to process")
+        # Qwen Omni encoders, Whisper, and OWSM are all designed to handle audio over 30s
 
         # Extract mel-spectrogram features using processor
         output = self.processor(
@@ -1278,6 +1324,15 @@ class ContinuousAudioIO(AbsIO):
                 paddings=[1, 1],
                 dilations=[1, 1],
             )
+        elif self.encoder_choice == "owsm":
+            # OWSM uses 3 conv layers with stride 2, padding 0
+            output_length = self._downsampling_length(
+                length,
+                kernel_sizes=[3, 3, 3],
+                strides=[2, 2, 2],
+                paddings=[0, 0, 0],
+                dilations=[1, 1, 1],
+            )
         else:
             raise NotImplementedError(
                 f"Model {self.encoder_hf_model_tag} not supported"
@@ -1359,6 +1414,8 @@ class ContinuousAudioIO(AbsIO):
             dtype=self.dtype_str,
             device="cpu",  # Workers use CPU
             skip_init_encoder=True,
+            encoder_config=self.encoder_config,
+            encoder_model_file=self.encoder_model_file,
         )
 
         return worker_copy
