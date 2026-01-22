@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 from espnet2.speechlm.dataloader.batch import batchfy
 from espnet2.speechlm.dataloader.dataset import CombinedDataset
-from espnet2.speechlm.dataloader.task_conf import TASK_CONFIGS
+from espnet2.speechlm.dataloader.task_conf import get_required_entries
 
 T = TypeVar("T")
 
@@ -134,7 +134,7 @@ class DataIteratorFactory:
                 task = entry[0]
                 data_name = entry[1]
 
-                required_entries = TASK_CONFIGS[task]["required_entries"]
+                required_entries = get_required_entries(task)
                 if required_entries != "dynamic":
                     dataset.verify_subset_entries(task, data_name, required_entries)
 

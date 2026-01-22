@@ -23,7 +23,7 @@ from espnet2.speechlm.model.speechlm.multimodal_io.audio import (
     DiscreteAudioIO,
 )
 from espnet2.speechlm.model.speechlm.multimodal_io.text import HuggingFaceTextIO
-from espnet2.speechlm.model.speechlm.task_conf_speechlm import SPEECHLM_TASK_CONFIGS
+from espnet2.speechlm.dataloader.task_conf import get_template
 from espnet2.speechlm.utils.data import pad_list
 
 _multimodal_ios = {
@@ -497,7 +497,7 @@ class SpeechLMPreprocessor:
             return messages
 
         else:
-            task_config = SPEECHLM_TASK_CONFIGS[task]
+            task_config = get_template(task)
             messages = list()
             for role, entry in task_config:
                 # When inference, only process the input information (user and system)
