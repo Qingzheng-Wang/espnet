@@ -1,0 +1,292 @@
+# ===== speech ====
+owsm_v4:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/owsm_v4/caption.json
+
+owsm_v4_asr:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/owsm_v4/asr.json
+
+emilia_en:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/emilia_en/caption.json
+
+# ===== sound ====
+audiocaps:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/audiocaps/caption.json
+
+audioset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/audioset/caption.json
+
+clotho_aqa:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/clotho_aqa/caption.json
+
+clotho_train:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/clotho_train/caption.json
+
+laion_in_the_wild_sound_events:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/laion_in_the_wild_sound_events/caption.json
+
+yt8m:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/yt8m/caption.json
+
+# ==== music ====
+fma:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/fma/caption.json
+
+laion_captioned_ai_music_snippets:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/laion_captioned_ai_music_snippets/caption.json
+
+mtg-jamendo-dataset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/mtg-jamendo-dataset/caption.json
+
+# ==== sft ====
+
+# ----- sift-50m -----
+# train
+sift50m_train_closed_ended_acoustic_level:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/train/closed_ended/dialogue/acoustic_level/dataset.json
+
+sift50m_train_closed_ended_comparison:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/train/closed_ended/dialogue/comparison/dataset.json
+
+sift50m_train_closed_ended_content_level:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/train/closed_ended/dialogue/content_level/dataset.json
+
+sift50m_train_closed_ended_word_align:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/train/closed_ended/dialogue/word_align/dataset.json
+
+sift50m_train_open_ended:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/train/open_ended/dataset.json
+
+sift50m_train_controllable_generation:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/train/controllable_generation/dataset.json
+
+# dev 
+sift50m_dev_closed_ended_acoustic_level:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/dev/closed_ended/dialogue/acoustic_level/dataset.json
+
+sift50m_dev_closed_ended_comparison:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/dev/closed_ended/dialogue/comparison/dataset.json
+
+sift50m_dev_closed_ended_content_level:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/dev/closed_ended/dialogue/content_level/dataset.json
+
+sift50m_dev_closed_ended_word_align:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/dev/closed_ended/dialogue/word_align/dataset.json
+
+sift50m_dev_open_ended:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/dev/open_ended/dataset.json
+
+sift50m_dev_controllable_generation:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/dev/controllable_generation/dataset.json
+
+# eval
+sift50m_EvalSIFT_closed_ended_acoustic_level:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/EvalSIFT/closed_ended/dialogue/acoustic_level/dataset.json
+
+sift50m_EvalSIFT_closed_ended_comparison:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/EvalSIFT/closed_ended/dialogue/comparison/dataset.json
+
+sift50m_EvalSIFT_closed_ended_content_level:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/EvalSIFT/closed_ended/dialogue/content_level/dataset.json
+
+sift50m_EvalSIFT_closed_ended_word_align:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/EvalSIFT/closed_ended/dialogue/word_align/dataset.json
+
+sift50m_EvalSIFT_open_ended:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/EvalSIFT/open_ended/dataset.json
+
+sift50m_EvalSIFT_controllable_generation:
+  path: /work/nvme/bbjs/qwang20/espnet_speechlm_latest/egs2/librispeech/speechlm1/data/sift50m/EvalSIFT/controllable_generation/dataset.json
+
+# ===== bagpiper stage5 curated datasets =====
+
+# ----- stage5_curated_music_und -----
+bagpiper_stage5_curated_music_und_audiocaps:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/audiocaps/dataset.json
+
+bagpiper_stage5_curated_music_und_audioset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/audioset/dataset.json
+
+bagpiper_stage5_curated_music_und_clotho_aqa:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/clotho_aqa/dataset.json
+
+bagpiper_stage5_curated_music_und_clotho_train:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/clotho_train/dataset.json
+
+bagpiper_stage5_curated_music_und_emilia_en:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/emilia_en/dataset.json
+
+bagpiper_stage5_curated_music_und_fma:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/fma/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_audio_300m_part1:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_audio_300m_part1/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_audio_300m_part2:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_audio_300m_part2/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_audio_300m_part3:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_audio_300m_part3/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_audio_300m_part4:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_audio_300m_part4/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_captioned_ai_music_snippets:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_captioned_ai_music_snippets/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_disco_12m_part1:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_disco_12m_part1/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_disco_12m_part2:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_disco_12m_part2/dataset.json
+
+bagpiper_stage5_curated_music_und_laion_in_the_wild_sound_events:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/laion_in_the_wild_sound_events/dataset.json
+
+bagpiper_stage5_curated_music_und_mtg_jamendo_dataset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/mtg-jamendo-dataset/dataset.json
+
+bagpiper_stage5_curated_music_und_owsm_v4_caption:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/owsm_v4_caption/dataset.json
+
+bagpiper_stage5_curated_music_und_wavcaps:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/wavcaps/dataset.json
+
+bagpiper_stage5_curated_music_und_yodas_auto:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/yodas_auto/dataset.json
+
+bagpiper_stage5_curated_music_und_yodas_manual:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/yodas_manual/dataset.json
+
+bagpiper_stage5_curated_music_und_youtube_8m_arkive:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/youtube_8m_arkive/dataset.json
+
+bagpiper_stage5_curated_music_und_yt8m:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_music_und/yt8m/dataset.json
+
+# ----- stage5_curated_sound_und -----
+bagpiper_stage5_curated_sound_und_audiocaps:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/audiocaps/dataset.json
+
+bagpiper_stage5_curated_sound_und_audioset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/audioset/dataset.json
+
+bagpiper_stage5_curated_sound_und_clotho_aqa:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/clotho_aqa/dataset.json
+
+bagpiper_stage5_curated_sound_und_clotho_train:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/clotho_train/dataset.json
+
+bagpiper_stage5_curated_sound_und_emilia_en:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/emilia_en/dataset.json
+
+bagpiper_stage5_curated_sound_und_fma:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/fma/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_audio_300m_part1:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_audio_300m_part1/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_audio_300m_part2:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_audio_300m_part2/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_audio_300m_part3:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_audio_300m_part3/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_audio_300m_part4:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_audio_300m_part4/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_captioned_ai_music_snippets:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_captioned_ai_music_snippets/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_disco_12m_part1:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_disco_12m_part1/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_disco_12m_part2:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_disco_12m_part2/dataset.json
+
+bagpiper_stage5_curated_sound_und_laion_in_the_wild_sound_events:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/laion_in_the_wild_sound_events/dataset.json
+
+bagpiper_stage5_curated_sound_und_mtg_jamendo_dataset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/mtg-jamendo-dataset/dataset.json
+
+bagpiper_stage5_curated_sound_und_owsm_v4_caption:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/owsm_v4_caption/dataset.json
+
+bagpiper_stage5_curated_sound_und_wavcaps:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/wavcaps/dataset.json
+
+bagpiper_stage5_curated_sound_und_yodas_auto:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/yodas_auto/dataset.json
+
+bagpiper_stage5_curated_sound_und_yodas_manual:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/yodas_manual/dataset.json
+
+bagpiper_stage5_curated_sound_und_youtube_8m_arkive:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/youtube_8m_arkive/dataset.json
+
+bagpiper_stage5_curated_sound_und_yt8m:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_sound_und/yt8m/dataset.json
+
+# ----- stage5_curated_speech_und -----
+bagpiper_stage5_curated_speech_und_audiocaps:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/audiocaps/dataset.json
+
+bagpiper_stage5_curated_speech_und_audioset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/audioset/dataset.json
+
+bagpiper_stage5_curated_speech_und_clotho_aqa:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/clotho_aqa/dataset.json
+
+bagpiper_stage5_curated_speech_und_clotho_train:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/clotho_train/dataset.json
+
+bagpiper_stage5_curated_speech_und_emilia_en:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/emilia_en/dataset.json
+
+bagpiper_stage5_curated_speech_und_fma:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/fma/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_audio_300m_part1:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_audio_300m_part1/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_audio_300m_part2:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_audio_300m_part2/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_audio_300m_part3:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_audio_300m_part3/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_audio_300m_part4:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_audio_300m_part4/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_captioned_ai_music_snippets:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_captioned_ai_music_snippets/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_disco_12m_part1:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_disco_12m_part1/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_disco_12m_part2:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_disco_12m_part2/dataset.json
+
+bagpiper_stage5_curated_speech_und_laion_in_the_wild_sound_events:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/laion_in_the_wild_sound_events/dataset.json
+
+bagpiper_stage5_curated_speech_und_mtg_jamendo_dataset:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/mtg-jamendo-dataset/dataset.json
+
+bagpiper_stage5_curated_speech_und_owsm_v4_caption:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/owsm_v4_caption/dataset.json
+
+bagpiper_stage5_curated_speech_und_wavcaps:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/wavcaps/dataset.json
+
+bagpiper_stage5_curated_speech_und_yodas_auto:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/yodas_auto/dataset.json
+
+bagpiper_stage5_curated_speech_und_yodas_manual:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/yodas_manual/dataset.json
+
+bagpiper_stage5_curated_speech_und_youtube_8m_arkive:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/youtube_8m_arkive/dataset.json
+
+bagpiper_stage5_curated_speech_und_yt8m:
+  path: /work/nvme/bbjs/shared/opuslm_v2_data/data_curation/stage5_curated_speech_und/yt8m/dataset.json
