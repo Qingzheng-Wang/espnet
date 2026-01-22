@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterator, Tuple
 
 import numpy as np
+import soundfile as sf
 
 try:
     from arkive import audio_read
@@ -213,3 +214,58 @@ class LhotseAudioReader:
         """Return iterator over (id, item) pairs."""
         for item in self.manifest:
             yield item.id, item
+
+
+class SoundfileReader:
+    """Dict-like lazy audio reader using soundfile directly from a wav.scp file.
+    
+    Args:
+        scp_path: Path to the wav.scp file.
+        valid_ids: List of valid IDs to keep (optional).
+    """
+
+    def __init__(self, scp_path: str, valid_ids: list = None):
+        self.data = {}
+        with open(scp_path, "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                utt_id = parts[0]
+                path = parts[1]
+                self.data[utt_id] = path
+
+        if valid_ids is not None:
+            valid_set = set(valid_ids)
+            self.data = {k: v for k, v in self.data.items() if k in valid_set}
+
+    def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
+        """Get audio by ID. Returns (audio_array, sample_rate)."""
+        path = self.data[key]
+        audio, sample_rate = sf.read(path)
+        
+        # Audio from soundfile is [samples, channels] or [samples]
+        # We need to return [channels, samples]
+        if audio.ndim == 1:
+            audio = audio[np.newaxis, :]  # Shape: [1, num_samples]
+        else:
+            audio = audio.T  # Shape: [num_channels, num_samples]
+
+        return audio, sample_rate
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.data
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def keys(self) -> Iterator[str]:
+        return iter(self.data.keys())
+
+    def values(self) -> Iterator[Tuple[np.ndarray, int]]:
+        for key in self.data:
+            yield self[key]
+
+    def items(self) -> Iterator[Tuple[str, Tuple[np.ndarray, int]]]:
+        for key in self.data:
+            yield key, self[key]
