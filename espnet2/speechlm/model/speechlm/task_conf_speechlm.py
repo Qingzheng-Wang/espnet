@@ -16,6 +16,7 @@ SPEECHLM_TASK_CONFIGS = {
     "text_to_audio": [("user", "text1"), ("assistant", "audio1")],
     "audio_to_text": [("user", "audio1"), ("assistant", "text1")],
     "text_only": [("assistant", "text1")],
+    "audio_to_text_interleave": "dynamic",  # Dynamic template at runtime, as the number of audio-text pairs is not fixed
 }
 
 
@@ -23,6 +24,8 @@ SPEECHLM_TASK_CONFIGS = {
 def _validate_task_templates():
     """Validate entries and roles in SPEECHLM_TASK_CONFIGS."""
     for task_name, template in SPEECHLM_TASK_CONFIGS.items():
+        if template == "dynamic":
+            continue  # Skip dynamic templates
         for role, entry in template:
             if role not in VALID_ROLES:
                 raise ValueError(
@@ -39,6 +42,8 @@ def _validate_task_templates():
 def _validate_task_consistency():
     """Validate that SPEECHLM_TASK_CONFIGS entries match TASK_CONFIGS."""
     for task_name, template in SPEECHLM_TASK_CONFIGS.items():
+        if template == "dynamic":
+            continue  # Skip dynamic templates
         # Extract entries from template
         template_entries = set(entry for role, entry in template)
 

@@ -25,6 +25,9 @@ TASK_CONFIGS = {
     "dialogue": {
         "required_entries": ["dialogue"],
     },
+    "audio_to_text_interleave": {
+        "required_entries": "dynamic",  # Dynamic validation at runtime, as the number of audio-text pairs is not fixed
+    },
 }
 
 
@@ -32,7 +35,10 @@ TASK_CONFIGS = {
 def _validate_task_configs():
     """Validate that all entries in TASK_CONFIGS are in SUPPORTED_ENTRIES."""
     for task_name, config in TASK_CONFIGS.items():
-        for entry in config.get("required_entries", []):
+        required_entries = config.get("required_entries", [])
+        if required_entries == "dynamic":
+            continue  # Skip dynamic tasks
+        for entry in required_entries:
             if entry not in SUPPORTED_ENTRIES:
                 raise ValueError(
                     f"Invalid entry '{entry}' in task '{task_name}'. "

@@ -90,16 +90,26 @@ class SpeechLMJobTemplate(AbsJobTemplate):
 
         # (2) add vocabulary from each discrete multimodal IO.
         start = num_special_tokens
+        special_vocab = set(vocab)
         for io_name, io in self.multimodal_io.items():
             if io.is_discrete:
-                vocab.extend(io.get_vocabulary())
+                multimodal_io_vocab = io.get_vocabulary()
+                duplicate_vocab = list(special_vocab & set(multimodal_io_vocab))
+                if len(duplicate_vocab) > 0:
+                    # special token is duplicate with multimodal IO's vocabulary
+                    # rename special token to avoid duplication
+                    for duplicate_token in duplicate_vocab:
+                        duplicate_token_index = vocab.index(duplicate_token)
+                        vocab[duplicate_token_index] = vocab[duplicate_token_index].replace("|>", f"_sp|>") # sp represents special
+                
+                vocab.extend(multimodal_io_vocab)
                 vocab_intervals[io_name] = [
                     (start + this_start, start + this_end)
                     for this_start, this_end in io.get_stream_interval()
                 ]
                 start = len(vocab)
 
-        assert len(vocab) == len(set(vocab)), "There are duplicated tokens in the vocab"
+        assert len(vocab) == len(set(vocab)), "Failed to _build_vocabulary: There are duplicated tokens in the vocab"
 
         return vocab, vocab_intervals
 
@@ -182,7 +192,11 @@ class SpeechLMPreprocessor:
         # (2) vocabulary
         self.vocab = vocab
         self.vocab_intervals = vocab_intervals
-        self.pad_id = self.vocab.index("<|pad|>")
+        # Try original name first, fallback to renamed version if it was renamed
+        if "<|pad_sp|>" in self.vocab:
+            self.pad_id = self.vocab.index("<|pad_sp|>")
+        else:
+            self.pad_id = self.vocab.index("<|pad|>")
 
         possible_num_stream = [
             io.num_stream() for io in multimodal_io.values() if io.is_discrete
@@ -404,7 +418,16 @@ class SpeechLMPreprocessor:
         """
         num_special_token = self.vocab_intervals["special_token"][0][1]
         special_tokens = self.vocab[:num_special_token]
-        token_id = special_tokens.index(token)
+        
+        # Try original token name first, fallback to renamed version if needed
+        if token in special_tokens:
+            token_id = special_tokens.index(token)
+        else:
+            # Token was renamed (e.g., <|pad|> -> <|pad_sp|>)
+            # because this special token is duplicate with multimodal IO's vocabulary
+            renamed_token = token.replace("|>", "_sp|>")
+            token_id = special_tokens.index(renamed_token)
+        
         retval = np.ones((1, self.num_stream)).astype(np.int64) * self.pad_id
         retval[0, 0] = token_id
         return retval
@@ -447,6 +470,32 @@ class SpeechLMPreprocessor:
                 mapped_messages.append((role, io_type, content))
 
             return mapped_messages
+
+        elif task == "audio_to_text_interleave":
+            # Handle interleaved audio-text sequences dynamically
+            # Data format: audio1 -> text2 -> audio3 -> text4 -> ...
+            messages = []
+            i = 1
+            while f"audio{i}" in data_dict:
+                # Add audio{2k-1} as user input
+                audio_data = data_dict[f"audio{i}"]
+                messages.append(("user", self.audio_input, audio_data))
+
+                # Add text{2k} as assistant response (compute loss on text)
+                text_key = f"text{i + 1}"
+                if text_key in data_dict and self.is_train:
+                    text_data = data_dict[text_key]
+                    messages.append(("assistant", "text", text_data))
+
+                i += 2  # 1 -> 3 -> 5 -> ...
+
+            if len(messages) == 0:
+                raise ValueError(
+                    f"audio_to_text_interleave requires at least audio1, "
+                    f"got: {list(data_dict.keys())}"
+                )
+            return messages
+
         else:
             task_config = SPEECHLM_TASK_CONFIGS[task]
             messages = list()

@@ -135,7 +135,8 @@ class DataIteratorFactory:
                 data_name = entry[1]
 
                 required_entries = TASK_CONFIGS[task]["required_entries"]
-                dataset.verify_subset_entries(task, data_name, required_entries)
+                if required_entries != "dynamic":
+                    dataset.verify_subset_entries(task, data_name, required_entries)
 
                 data_list = all_subsets[data_name]
                 data_list = [(task, data_name, example_id) for example_id in data_list]
