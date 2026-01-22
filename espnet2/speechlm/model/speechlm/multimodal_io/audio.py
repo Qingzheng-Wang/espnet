@@ -13,7 +13,6 @@ import torch
 import librosa
 
 from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
-from espnet2.speechlm.model.speechlm.multimodal_io.audio_tower.whisper_audio_tower import WhisperAudioTower
 
 
 # NOTE(Jinchuan): derived from egs2/TEMPLATE/asr1/pyscripts/feats/dump_km_label.py
@@ -912,6 +911,7 @@ class ContinuousAudioIO(AbsIO):
     This class handles continuous audio representations using neural encoders
     that produce dense feature vectors instead of discrete tokens.
     """
+    SUPPORTED_ENCODER_CHOICES = ["huggingface", "owsm"]
     SUPPORTED_HF_MODEL_TAGS = [
         "Qwen/Qwen2.5-Omni-7B", "Qwen/Qwen3-Omni-30B-A3B-Instruct",
         "openai/whisper-large-v3-turbo", "openai/whisper-large-v3",
@@ -923,8 +923,8 @@ class ContinuousAudioIO(AbsIO):
 
     def __init__(
         self,
-        encoder_choice: str = "huggingface",
-        encoder_hf_model_tag: str = "Qwen/Qwen2.5-Omni-7B",
+        encoder_choice: str = None,
+        encoder_hf_model_tag: str = None,
         attn_implementation: str = None,
         dtype: str = "bfloat16",
         device: str = "cpu",
@@ -1040,6 +1040,7 @@ class ContinuousAudioIO(AbsIO):
                     )
                 
                 from transformers import WhisperProcessor
+                from espnet2.speechlm.model.speechlm.multimodal_io.audio_tower.whisper_audio_tower import WhisperAudioTower
 
                 chunk_length = 3000 # 30s, hop length 10ms => 3000 frames
                 self.model = WhisperAudioTower(
@@ -1088,7 +1089,8 @@ class ContinuousAudioIO(AbsIO):
             self.n_samples = self.processor.n_samples
         else:
             raise NotImplementedError(
-                f"Encoder choice {self.encoder_choice} not implemented"
+                f"Encoder choice {self.encoder_choice} not supported."
+                f"Supported choices: {self.SUPPORTED_ENCODER_CHOICES}"
             )
 
     def _init_minimal_attributes(self):
@@ -1182,7 +1184,8 @@ class ContinuousAudioIO(AbsIO):
             self.model = None
         else:
             raise NotImplementedError(
-                f"Encoder choice {self.encoder_choice} not implemented"
+                f"Encoder choice {self.encoder_choice} not supported."
+                f"Supported choices: {self.SUPPORTED_ENCODER_CHOICES}"
             )
 
     def preprocess(
@@ -1267,7 +1270,7 @@ class ContinuousAudioIO(AbsIO):
         # Calculate output lengths after model's downsampling
         output_length = self._encoder_output_length(length)
 
-        if "Qwen" in self.encoder_hf_model_tag:
+        if self.encoder_choice == "huggingface" and "Qwen" in self.encoder_hf_model_tag:
             # Split concatenated features back into individual samples
             # Qwen audio tower outputs concatenated features like [■■■■■ ■■■ ■■■■■■■]
             # Need to split back into individual samples
@@ -1287,43 +1290,49 @@ class ContinuousAudioIO(AbsIO):
         Returns:
             Output length tensor of shape [batch]
         """
-        if self.encoder_hf_model_tag == "Qwen/Qwen2.5-Omni-7B":
-            output_length = self._downsampling_length(
-                length,
-                kernel_sizes=[3, 3, 2],
-                strides=[1, 2, 2],
-                paddings=[1, 1, 0],
-                dilations=[1, 1, 1],
-            )
-        elif self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct":
-            input_length_leave = length % self.chunk_length
-            output_length_leave = self._downsampling_length(
-                input_length_leave,
-                kernel_sizes=[3, 3, 3],
-                strides=[2, 2, 2],
-                paddings=[1, 1, 1],
-                dilations=[1, 1, 1],
-            )
+        if self.encoder_choice == "huggingface":
+            if self.encoder_hf_model_tag == "Qwen/Qwen2.5-Omni-7B":
+                output_length = self._downsampling_length(
+                    length,
+                    kernel_sizes=[3, 3, 2],
+                    strides=[1, 2, 2],
+                    paddings=[1, 1, 0],
+                    dilations=[1, 1, 1],
+                )
+            elif self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct":
+                input_length_leave = length % self.chunk_length
+                output_length_leave = self._downsampling_length(
+                    input_length_leave,
+                    kernel_sizes=[3, 3, 3],
+                    strides=[2, 2, 2],
+                    paddings=[1, 1, 1],
+                    dilations=[1, 1, 1],
+                )
 
-            chunk_num = length // self.chunk_length
-            chunk_output_length = self._downsampling_length(
-                self.chunk_length,
-                kernel_sizes=[3, 3, 3],
-                strides=[2, 2, 2],
-                paddings=[1, 1, 1],
-                dilations=[1, 1, 1],
-            )
+                chunk_num = length // self.chunk_length
+                chunk_output_length = self._downsampling_length(
+                    self.chunk_length,
+                    kernel_sizes=[3, 3, 3],
+                    strides=[2, 2, 2],
+                    paddings=[1, 1, 1],
+                    dilations=[1, 1, 1],
+                )
 
-            output_length = chunk_num * chunk_output_length + output_length_leave
-        
-        elif "whisper" in self.encoder_hf_model_tag:
-            output_length = self._downsampling_length(
-                length,
-                kernel_sizes=[3, 3],
-                strides=[1, 2],
-                paddings=[1, 1],
-                dilations=[1, 1],
-            )
+                output_length = chunk_num * chunk_output_length + output_length_leave
+            
+            elif "whisper" in self.encoder_hf_model_tag:
+                output_length = self._downsampling_length(
+                    length,
+                    kernel_sizes=[3, 3],
+                    strides=[1, 2],
+                    paddings=[1, 1],
+                    dilations=[1, 1],
+                )
+            else:
+                raise NotImplementedError(
+                    f"Model {self.encoder_hf_model_tag} not supported"
+                    f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
+                )
         elif self.encoder_choice == "owsm":
             # OWSM uses 3 conv layers with stride 2, padding 0
             output_length = self._downsampling_length(
@@ -1335,8 +1344,8 @@ class ContinuousAudioIO(AbsIO):
             )
         else:
             raise NotImplementedError(
-                f"Model {self.encoder_hf_model_tag} not supported"
-                f"Supported models: {self.SUPPORTED_HF_MODEL_TAGS}"
+                f"Encoder choice {self.encoder_choice} not supported"
+                f"Supported choices: huggingface, owsm"
             )
 
         return output_length
