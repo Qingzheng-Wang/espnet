@@ -7,9 +7,10 @@
 import argparse
 import json
 import logging
-from multiprocessing import Pool
+from multiprocessing import Pool, Manager
 from pathlib import Path
-from typing import Dict, Tuple
+from threading import Thread
+from typing import Dict, Set, Tuple
 
 import yaml
 
@@ -76,6 +77,17 @@ def get_parser() -> argparse.ArgumentParser:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level",
     )
+    parser.add_argument(
+        "--flush-interval",
+        type=int,
+        default=1000,
+        help="Number of samples between flushes to disk (for resume support)",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable resume mode: overwrite existing files instead of continuing",
+    )
 
     return parser
 
@@ -86,8 +98,25 @@ def worker(
     world_size: int,
     unregistered_spec: str = "",
     registered_spec: str = "",
+    processed_keys: Set[str] = None,
+    result_queue=None,
+    flush_interval: int = 1000,
 ):
-    """Worker function to collect length statistics for a data shard."""
+    """Worker function to collect length statistics for a data shard.
+
+    Args:
+        preprocessor: Data preprocessor
+        rank: Worker rank
+        world_size: Total number of workers
+        unregistered_spec: Unregistered data specifier
+        registered_spec: Registered data specifier
+        processed_keys: Set of already processed example_ids (for resume)
+        result_queue: Queue to send intermediate results (for flush)
+        flush_interval: Number of samples between flushes
+    """
+    if processed_keys is None:
+        processed_keys = set()
+
     # Create iterator with appropriate specifier
     iterator = DataIteratorFactory(
         unregistered_specifier=unregistered_spec,
@@ -102,21 +131,97 @@ def worker(
 
     # Collect statistics for this shard
     stats = {}
+    skipped = 0
     for key, data_dict in iterator:
         key = tuple(key)
+        example_id = key[2]  # (task, data_name, example_id)
+
+        # Skip already processed keys (resume support)
+        if example_id in processed_keys:
+            skipped += 1
+            continue
+
         stats[key] = preprocessor.find_length(key, data_dict)
 
-        if len(stats) % 1000 == 0:
+        if len(stats) % flush_interval == 0 and len(stats) > 0:
             logging.getLogger(__name__).info(
-                f"Worker {rank}: Processed {len(stats)} entries"
+                f"Worker {rank}: Processed {len(stats)} entries, skipped {skipped}"
             )
+            # Flush intermediate results to queue
+            if result_queue is not None:
+                result_queue.put(dict(stats))
+                stats.clear()
+
+    # Send remaining results
+    if result_queue is not None and stats:
+        result_queue.put(dict(stats))
+        stats.clear()
 
     return stats
 
+def worker_wrapper(args):
+    return worker(*args)
+
+
+def load_existing_stats(output_file: Path) -> Set[str]:
+    """Load already processed example_ids from existing stats file.
+
+    Args:
+        output_file: Path to the existing JSONL stats file
+
+    Returns:
+        Set of already processed example_ids
+    """
+    processed_keys = set()
+    if output_file.exists():
+        with open(output_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    processed_keys.update(obj.keys())
+                except json.JSONDecodeError:
+                    continue
+    return processed_keys
+
+
+def flush_writer(result_queue, output_file: Path, stop_event):
+    """Background thread to write results from queue to file.
+
+    Args:
+        result_queue: Queue containing stats dictionaries from workers
+        output_file: Output file path
+        stop_event: Event to signal writer to stop
+    """
+    logger = logging.getLogger(__name__)
+    total_written = 0
+
+    with open(output_file, "a") as f:
+        while not stop_event.is_set() or not result_queue.empty():
+            try:
+                # Use timeout to periodically check stop_event
+                stats = result_queue.get(timeout=0.5)
+                for key_tuple, value in stats.items():
+                    example_id = key_tuple[2]
+                    json_obj = {example_id: value}
+                    f.write(json.dumps(json_obj) + "\n")
+                f.flush()
+                total_written += len(stats)
+                logger.info(f"Flushed {len(stats)} entries (total: {total_written})")
+            except Exception:
+                # Queue.Empty or other exceptions
+                continue
 
 def collect_length_stats(
-    preprocessor, num_workers: int, spec_type: str, specifier: str
-) -> Dict[Tuple[str, ...], int]:
+    preprocessor,
+    num_workers: int,
+    spec_type: str,
+    specifier: str,
+    output_file: Path,
+    flush_interval: int = 1000,
+) -> int:
     """Collect length statistics from all worker processes.
 
     Args:
@@ -124,51 +229,99 @@ def collect_length_stats(
         num_workers: Number of parallel workers
         spec_type: Either "unregistered" or "registered"
         specifier: The data specifier string
+        output_file: Path to output file (for resume and flush)
+        flush_interval: Number of samples between flushes
 
     Returns:
-        Aggregated statistics dictionary
+        Number of new entries processed
     """
+    from threading import Event
+
+    logger = logging.getLogger(__name__)
+
+    # Load existing processed keys for resume
+    processed_keys = load_existing_stats(output_file)
+    if processed_keys:
+        logger.info(f"Resume mode: found {len(processed_keys)} already processed keys")
+
     # Set up keyword arguments based on spec type
     kwargs = {
         "unregistered_spec": specifier if spec_type == "unregistered" else "",
         "registered_spec": specifier if spec_type == "registered" else "",
     }
 
+    # Create shared queue and stop event for flush writer
+    manager = Manager()
+    result_queue = manager.Queue()
+    stop_event = Event()
+
+    # Start background writer thread
+    writer_thread = Thread(
+        target=flush_writer,
+        args=(result_queue, output_file, stop_event),
+        daemon=True,
+    )
+    writer_thread.start()
+
     # Run workers in parallel
-    with Pool(num_workers) as pool:
-        results = [
-            pool.apply_async(
-                worker, args=(preprocessor, rank, num_workers), kwds=kwargs
-            )
-            for rank in range(num_workers)
-        ]
+    args_list = [
+        (
+            preprocessor,
+            rank,
+            num_workers,
+            kwargs["unregistered_spec"],
+            kwargs["registered_spec"],
+            processed_keys,
+            result_queue,
+            flush_interval,
+        )
+        for rank in range(num_workers)
+    ]
 
-        # Aggregate results from all workers
-        aggregated_stats = {}
-        for result in results:
-            aggregated_stats.update(result.get())
+    total_new = 0
+    try:
+        with Pool(num_workers) as pool:
+            for result in pool.imap_unordered(worker_wrapper, args_list):
+                # Any remaining results (shouldn't happen with queue mode)
+                if result:
+                    result_queue.put(result)
+                    total_new += len(result)
+    finally:
+        # Signal writer to stop and wait for it
+        stop_event.set()
+        writer_thread.join(timeout=10)
 
-    return aggregated_stats
+    return total_new
 
-
-def save_stats(stats: Dict[Tuple[str, ...], int], output_file: Path) -> None:
-    """Save statistics dictionary to JSONL file."""
+def summarize_stats(output_file: Path) -> None:
+    """Print summary statistics for the output file."""
     logger = logging.getLogger(__name__)
 
-    # Save to JSONL format
-    with open(output_file, "w") as f:
-        for key_tuple, value in stats.items():
-            # Only keep the example_id, and discard the task and data_name
-            json_obj = {key_tuple[2]: value}
-            f.write(json.dumps(json_obj) + "\n")
+    if not output_file.exists():
+        return
 
-    # Log summary
-    if stats:
-        total_frames = sum(stats.values())
+    total_entries = 0
+    total_frames = 0
+
+    with open(output_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                for value in obj.values():
+                    total_entries += 1
+                    total_frames += value
+            except json.JSONDecodeError:
+                continue
+
+    if total_entries > 0:
         logger.info(
-            f"Saved {len(stats)} entries to {output_file} | "
+            f"Stats summary for {output_file}: "
+            f"{total_entries} entries | "
             f"Total: {total_frames} frames | "
-            f"Avg: {total_frames / len(stats):.1f} frames/entry"
+            f"Avg: {total_frames / total_entries:.1f} frames/entry"
         )
 
 
@@ -217,17 +370,32 @@ def main():
         task, data_name = parts[0], parts[1]
         output_file = args.output_dir / f"stats_{task}_{data_name}.jsonl"
 
-        # Skip if already exists
+        # Handle existing file
         if output_file.exists():
-            logger.info(f"Skipping {specifier} - stats already exist")
-            continue
+            if args.no_resume:
+                logger.info(f"Overwriting existing file: {output_file}")
+                output_file.unlink()
+            else:
+                existing_count = len(load_existing_stats(output_file))
+                logger.info(
+                    f"Resume mode for {specifier}: "
+                    f"found {existing_count} existing entries"
+                )
 
-        # Collect and save statistics
+        # Collect statistics (with resume and flush support)
         logger.info(f"Processing {spec_type} specifier: {specifier}")
-        stats = collect_length_stats(
-            preprocessor, args.num_workers, spec_type, specifier
+        new_count = collect_length_stats(
+            preprocessor,
+            args.num_workers,
+            spec_type,
+            specifier,
+            output_file,
+            args.flush_interval,
         )
-        save_stats(stats, output_file)
+        logger.info(f"Added {new_count} new entries for {specifier}")
+
+        # Print summary
+        summarize_stats(output_file)
 
 
 if __name__ == "__main__":
